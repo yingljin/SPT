@@ -63,7 +63,7 @@ where:
 $$Y'_i(\mathbf{s},t) = \beta_i(t)Y_i(\mathbf{s},t) + b'_i(\mathbf{s},t) + \epsilon_i(\mathbf{s}, t)$$
 
 
-# Simple example
+# Simple 1
 
 For start, let's generate from the following scheme: 
 
@@ -75,9 +75,10 @@ Y_{2i}(\mathbf{s},t) &= 2tY_{1i}(\mathbf{s},t)+\sigma^2(\mathbf{s}, t)\\
 
 - $\mathbf{s}$ is the **standardized** spatial index from a 256 by 256 imagae
 - $t = 0.2, 0.4, 0.6, 0.8, 1$
-- $\xi_{ik}, \xi'_{ik}$ are indenpendently generated from $N(0, 1)$
+- $\xi_{i1}, \xi_{i2}$ are indenpendently generated from $N(0, 1)$
 - $\sigma^2(\mathbf{s}, t)$ is a white noise generated from $N(0, 1)$
 - $\epsilon_i$ is a moving average process of a 2D white noise field from $N(0, 5^2)$, derived by a 15 by 15 filter. Please note here I have increased the variation of white noise Z because I would like to keep strong spatial correaltion (per last meeting)
+- I removed the random effects from $Y_2$, because it is easier to find true slope this way. Also I was worried it might induce unidentifiability problem. 
 
 In the real dataset, a lot of things would be different for each lesion (e.g., the correlation, size of image, center of image, correlation between two outcomes). However, the current set up seems to imply constant correlation across subjects.
 
@@ -199,7 +200,7 @@ $$Y_{2i}(\mathbf{s}|t) = \beta_{0ti}+\beta_{1ti}Y_{1i}(\mathbf{s}|t)+\epsilon_i(
 
 
 - We fit a linear model at **each time** point for **each subject** (that is, $5 \times 100$ models)
-- For now we ignore random effects across space. Consider only fixed effects
+- For now we ignore random effects/correlation across space. Consider only fixed effects
 - The true slope in this case is $2t$
 
 <!-- Conditional on both subject and time, the **true** slope should be $2t+\frac{\xi_{i1}'}{\xi_{i1}}$ ? -->
@@ -221,7 +222,7 @@ df_subj %>% group_by(id, t) %>%
   mutate(true_beta1 = 2*t) %>% 
   mutate(cover = (cil <= true_beta1 & ciu >= true_beta1)) %>%
   group_by(t) %>%
-  summarise(cov_rate = mean(cover))
+  summarise(cov_rate = mean(cover)) 
 ```
 
 ```{r fig.height=3, fig.width=15}
@@ -236,9 +237,9 @@ df_subj %>% group_by(id, t) %>%
   facet_wrap(~t, nrow = 1, scales = "free_x")
 ```
 
-# Example 2: Moving average error in Y2
+# Example 2: Moving average error both outcomes
 
-- What if we introduce a spatial MA error in Y2? 
+In the previous sample, spatial correlation of $Y_2$ is much weaker than $Y_1$. What if we introduce a spatial MA error in $Y_2$ as well? 
 
 \[\begin{aligned}
 Y_{1i}(\mathbf{s}, t) &= \phi(\mathbf{s})\xi_{i1}+t\xi_{i2}+\epsilon_{1i}(\mathbf{s}, t), \ \xi_{ik} \sim N(0, \sigma^2_{k}) \\
@@ -322,7 +323,7 @@ df_subj2 %>% group_by(id, t) %>%
   mutate(true_beta1 = 2*t) %>% 
   mutate(cover = (cil <= true_beta1 & ciu >= true_beta1)) %>%
   group_by(t) %>%
-  summarise(cov_rate = mean(cover))
+  summarise(cov_rate = mean(cover))  
 ```
 
 ```{r, fig.height=3, fig.width=15}
@@ -388,9 +389,8 @@ df_subj2 %>% group_by(id, t) %>%
   mutate(true_beta1 = 2*t) %>% 
   mutate(cover = (cil <= true_beta1 & ciu >= true_beta1)) %>%
   group_by(t) %>%
-  summarise(cov_rate = mean(cover))
+  summarise(cov_rate = mean(cover)) 
 ```
-
 
 
 
