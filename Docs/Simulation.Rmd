@@ -30,7 +30,7 @@ source(here("Code/RandomField.R"))
 ```
 
 
-# Generate from model 
+# Generation framework
 
 The simulation, technically, would be established on a continuous space-time domain, even though the final "observations" would be a discrete realization.
 
@@ -63,21 +63,22 @@ where:
 $$Y'_i(\mathbf{s},t) = \beta_i(t)Y_i(\mathbf{s},t) + b'_i(\mathbf{s},t) + \epsilon_i(\mathbf{s}, t)$$
 
 
-# Simple 1
+# Full data
 
-For start, let's generate from the following scheme: 
+Follow up on last time, we would like to generate data from the null hypothesis ($Y_1$, $Y_2$ are not correlated with each other), examine p values from LM or permutation test, and calculate their type I error (probablity of reject under the null hypothesis) at 95% confidence level.
+
+Let's generate from the following scheme: 
 
 \[\begin{aligned}
-Y_{1i}(\mathbf{s}, t) &= \phi(\mathbf{s})\xi_{i1}+t\xi_{i2}+\epsilon_i(\mathbf{s}, t), \ \xi_{ik} \sim N(0, \sigma^2_{k}) \\
+Y_{1i}(\mathbf{s}, t) &= \phi(\mathbf{s})\xi_{i1}+t\xi_{i2}+\epsilon_{1i}(\mathbf{s}, t), \ \xi_{ik} \sim N(0, \sigma^2_{k}) \\
 \phi_1(\mathbf{s}) &= \sqrt{s_1^2+s_2^2}\\
-Y_{2i}(\mathbf{s},t) &= 2tY_{1i}(\mathbf{s},t)+\sigma^2(\mathbf{s}, t)\\
+Y_{2i}(\mathbf{s},t) &= \epsilon_{2i}(\mathbf{s}, t)\\
 \end{aligned}\]
 
 - $\mathbf{s}$ is the **standardized** spatial index from a 256 by 256 imagae
 - $t = 0.2, 0.4, 0.6, 0.8, 1$
 - $\xi_{i1}, \xi_{i2}$ are indenpendently generated from $N(0, 1)$
-- $\sigma^2(\mathbf{s}, t)$ is a white noise generated from $N(0, 1)$
-- $\epsilon_i$ is a moving average process of a 2D white noise field from $N(0, 5^2)$, derived by a 15 by 15 filter. Please note here I have increased the variation of white noise Z because I would like to keep strong spatial correaltion (per last meeting)
+- $\epsilon_{1i}$ and $\epsilon_{2i}$ is a moving average process of a 2D white noise field from $N(0, 5^2)$, derived by a 15 by 15 filter. Please note here I have increased the variation of white noise Z because I would like to keep strong spatial correlation (per last meeting)
 - I removed the random effects from $Y_2$, because it is easier to find true slope this way. Also I was worried it might induce unidentifiability problem. 
 
 In the real dataset, a lot of things would be different for each lesion (e.g., the correlation, size of image, center of image, correlation between two outcomes). However, the current set up seems to imply constant correlation across subjects.
@@ -100,16 +101,6 @@ nT <- length(t)
 df_grid <- expand_grid(df_grid, t=t) 
 ## 256^2*5 = 327680 observations for each subject
 ```
-
-
-```{r eval=FALSE}
-# look at distance to center
-df_grid %>% 
-  ggplot()+
-  geom_tile(aes(x=s1, y=s2, fill = dist))+
-  facet_wrap(~t)
-```
-
 
 
 ```{r sim_setup}
@@ -139,17 +130,21 @@ for(i in 1:N){ # fix a subject
   for(this_t in t){ # fix a time point
     
     dist_it <- df_subj$dist[df_subj$id==i & df_subj$t==this_t]
+    
     # generate Y1
     ## a moving average error
-    Zmat_it <- matrix(rnorm(nS^2, 0, 5), nS, nS)
-    MA_err_it <- MA_rand_field(ma_size, Zmat_it) # flatten by column
-    MA_err_it <- as.vector(MA_err_it)
+    Zmat_it1 <- matrix(rnorm(nS^2, 0, 5), nS, nS)
+    MA_err_it1 <- MA_rand_field(ma_size, Zmat_it1) # flatten by column
+    MA_err_it1 <- as.vector(MA_err_it1)
     # outcome
-    Y1_it <- dist_it*xi_i[1]+this_t*xi_i[2]+MA_err_it
+    Y1_it <- dist_it*xi_i[1]+this_t*xi_i[2]+MA_err_it1
     df_subj$Y1[df_subj$id==i & df_subj$t==this_t] <- Y1_it
     
     # generate Y2
-    Y2_it <- 2*this_t*Y1_it+rnorm(length(Y1_it))
+    ## a moving average error
+    Zmat_it2 <- matrix(rnorm(nS^2, 0, 5), nS, nS)
+    MA_err_it2 <- MA_rand_field(ma_size, Zmat_it2) # flatten by column
+    Y2_it <- as.vector(MA_err_it2)
     df_subj$Y2[df_subj$id==i & df_subj$t==this_t] <- Y2_it
   }
 
@@ -191,206 +186,187 @@ df_subj %>%
 
 
 
-## LM Confidence interval
+## LM
 
-Below I'd like to calculate the slope from linear regression of $Y_{2i}$ wrt $Y_{it}$, get the 95% confidence interval and check its coverage rate (how many times the confidence interval covers the true slope):
+Below I'd like to fit a linear regression model of $Y_{2i}$ wrt $Y_{it}$, get the p values of slope and calculate type I error. The model expression is as below: 
 
 $$Y_{2i}(\mathbf{s}|t) = \beta_{0ti}+\beta_{1ti}Y_{1i}(\mathbf{s}|t)+\epsilon_i(\mathbf{s}|t)$$
 
 
 
 - We fit a linear model at **each time** point for **each subject** (that is, $5 \times 100$ models)
-- For now we ignore random effects/correlation across space. Consider only fixed effects
-- The true slope in this case is $2t$
-
-<!-- Conditional on both subject and time, the **true** slope should be $2t+\frac{\xi_{i1}'}{\xi_{i1}}$ ? -->
+- The true slope in this case is 0. The two outcomes are not correlated with each other. 
 
 
-```{r ci_func_lm}
-get_beta_ci <- function(x){
+```{r func_lm}
+lm_beta_pval <- function(x){
   fit_lm <- lm(Y2~Y1, data = x)
   beta1 <- coef(fit_lm)["Y1"] 
-  ci <- confint(fit_lm)["Y1", ]
+  pval <- summary(fit_lm)$coefficients["Y1", "Pr(>|t|)"]
   
-  return(data.frame(beta1 = beta1, cil = ci[1], ciu = ci[2]))
+  return(data.frame(beta1 = beta1, pval = pval))
 }
 ```
-
-```{r ci_cov_rate}
-df_subj %>% group_by(id, t) %>%
-  group_modify(~get_beta_ci(.)) %>%
-  mutate(true_beta1 = 2*t) %>% 
-  mutate(cover = (cil <= true_beta1 & ciu >= true_beta1)) %>%
-  group_by(t) %>%
-  summarise(cov_rate = mean(cover)) 
-```
-
-```{r fig.height=3, fig.width=15}
-df_subj %>% group_by(id, t) %>%
-  group_modify(~get_beta_ci(.)) %>%
-  mutate(true_beta1 = 2*t) %>%
-  ggplot()+
-  coord_flip()+
-  geom_errorbar(aes(ymin=cil, ymax=ciu, x = id))+
-  geom_point(aes(x=id, y=beta1), size = 0.2)+
-  geom_point(aes(x=id, y=true_beta1), col = "red", size = 0.2)+
-  facet_wrap(~t, nrow = 1, scales = "free_x")
-```
-
-# Example 2: Moving average error both outcomes
-
-In the previous sample, spatial correlation of $Y_2$ is much weaker than $Y_1$. What if we introduce a spatial MA error in $Y_2$ as well? 
-
-\[\begin{aligned}
-Y_{1i}(\mathbf{s}, t) &= \phi(\mathbf{s})\xi_{i1}+t\xi_{i2}+\epsilon_{1i}(\mathbf{s}, t), \ \xi_{ik} \sim N(0, \sigma^2_{k}) \\
-\phi_1(\mathbf{s}) &= \sqrt{s_1^2+s_2^2}\\
-Y_{2i}(\mathbf{s},t) &= 2tY_{1i}(\mathbf{s},t)+\epsilon_{2i}(\mathbf{s}, t)\\
-\end{aligned}\]
 
 ```{r}
-df_subj2 <- df_subj %>%
-  select(-Y1, -Y2) %>%
-  mutate(Y1=NA, Y2=NA)
+df_subj %>% 
+  group_by(id, t) %>%
+  group_modify(~lm_beta_pval(.)) %>%
+  mutate(reject = (pval <= 0.05)) %>%
+  group_by(t) %>%
+  summarise(type1err = mean(reject)) 
 ```
+This type I error is so high! Is it solely because the correlation introduced by both sptailly-correlated error term? 
 
-```{r gen_data2, results='hide', cache=TRUE}
-pb <- txtProgressBar(min=0, max=N, style = 3)
+## Permutation test 
+
+I have decided to code up my own permutation test because the packages (coin, lmPerm) either couldn't handle the data or have a lot of other contingencies. 
+
+I followed this [reference](https://bookdown.org/curleyjp0/psy317l_guides5/permutation-testing.html#correlation-coefficient-permutation-tests) on permutation test of correlation. 
+
+
+
+```{r perm_test, class.source='fold-show', results='hide', cache=TRUE}
+
+M <- 100 # number of permutation
+pval_mat <- matrix(NA, nrow = N, ncol = nT)
+pb <- txtProgressBar(min = 0, max=N, style = 3)
 
 t1 <- Sys.time()
-for(i in 1:N){ # fix a subject
-  
-  xi_i <- xi_mat[i, ]
-  
-  for(this_t in t){ # fix a time point
+for(i in 1: N){
+  for(this_t in seq_along(t)){
+    df_it <- df_subj %>% filter(id==i & t == t[this_t])
     
-    dist_it <- df_subj$dist[df_subj$id==i & df_subj$t==this_t]
-    # generate Y1
-    ## a moving average error
-    Zmat_it1 <- matrix(rnorm(nS^2, 0, 5), nS, nS)
-    MA_err_it1 <- MA_rand_field(ma_size, Zmat_it1) # flatten by column
-    MA_err_it1 <- as.vector(MA_err_it1)
-    # outcome
-    Y1_it <- dist_it*xi_i[1]+this_t*xi_i[2]+MA_err_it1
-    df_subj2$Y1[df_subj2$id==i & df_subj2$t==this_t] <- Y1_it
+    # observed slope
+    obs_beta <- coef(lm(Y2~Y1, data = df_it))["Y1"]
     
-    # generate Y2
-    ## a moving average error
-    Zmat_it2 <- matrix(rnorm(nS^2, 0, 5), nS, nS)
-    MA_err_it2 <- MA_rand_field(ma_size, Zmat_it2) # flatten by column
-    MA_err_it2 <- as.vector(MA_err_it2)
-    Y2_it <- 2*this_t*Y1_it+MA_err_it2
-    df_subj2$Y2[df_subj2$id==i & df_subj2$t==this_t] <- Y2_it
+    # permutation 
+    beta_perm <- rep(NA, M)
+    for(m in 1:M){
+      df_it_m <- df_it
+      df_it_m$Y2_perm <- sample(df_it_m$Y2) # shuffle Y2, fix Y1
+      beta_perm[m] <- coef(lm(Y2_perm~Y1, data = df_it_m))["Y1"]
+    }
+    
+    pval_mat[i, this_t] <- sum(beta_perm>obs_beta)/M
+    
   }
-
-setTxtProgressBar(pb, i)
+  
+  setTxtProgressBar(pb, i)
+  
+  
 }
 t2 <- Sys.time()
-
 close(pb)
+
+
+```
+
+The permutation rest took `r round(t2-t1, 2)` minutes. 
+
+```{r}
+data.frame(t = t, 
+           type1err = apply(pval_mat < 0.05, 2, mean))
 ```
 
 
-```{r, fig.height=3, fig.width=15}
-df_subj2 %>% 
-  filter(id==25) %>% 
-  ggplot()+
-  geom_tile(aes(x=s1, y=s2, fill = Y1))+
-  facet_wrap(~t, nrow = 1)+
-  labs(title = "Y1")
+# Reduced data
 
-df_subj2 %>% 
-  filter(id==25) %>% 
-  ggplot()+
-  geom_tile(aes(x=s1, y=s2, fill = Y2))+
-  facet_wrap(~t, nrow = 1)+
-  labs(title = "Y2")
+Since the data size is too large for GLS, I'll do another experiment on the reduced data. Along each axis, one grid point is taken every 8 grid points, making the reduced an 32 by 32 image at each time point for each subject. 
 
-df_subj2 %>% 
-  filter(id==25) %>%
-  ggplot(aes(x=Y1, y=Y2))+
-  geom_point(size = 0.2)+
-  geom_smooth(formula = 'y~x', method = "lm")+
-  stat_cor(method = "pearson")+
-  facet_wrap(~t, nrow = 1)
+```{r}
+# reduce grid
+re_sid <- seq(0, 256, by = 8)
+df_subj_re <- df_subj %>% filter(sid1 %in% re_sid & sid2 %in% re_sid)
 ```
+
 
 
 ## LM
 
-```{r ci_cov_rate_lm}
-df_subj2 %>% group_by(id, t) %>%
-  group_modify(~get_beta_ci(.)) %>%
-  mutate(true_beta1 = 2*t) %>% 
-  mutate(cover = (cil <= true_beta1 & ciu >= true_beta1)) %>%
+```{r}
+df_subj_re %>% group_by(id, t) %>%
+  group_modify(~lm_beta_pval(.)) %>%
+  mutate(reject = (pval <= 0.05)) %>%
   group_by(t) %>%
-  summarise(cov_rate = mean(cover))  
+  summarise(type1err = mean(reject)) 
 ```
 
-```{r, fig.height=3, fig.width=15}
-df_subj2 %>% group_by(id, t) %>%
-  group_modify(~get_beta_ci(.)) %>%
-  mutate(true_beta1 = 2*t) %>%
-  ggplot()+
-  coord_flip()+
-  geom_errorbar(aes(ymin=cil, ymax=ciu, x = id))+
-  geom_point(aes(x=id, y=beta1), size = 0.2)+
-  geom_point(aes(x=id, y=true_beta1), col = "red", size = 0.2)+
-  facet_wrap(~t, nrow = 1, scales = "free_x")
+## Permutation test
 
+```{r, class.source='fold-show', results='hide', cache=TRUE}
+
+M <- 100 # number of permutation
+pval_mat_re <- matrix(NA, nrow = N, ncol = nT)
+pb <- txtProgressBar(min = 0, max=N, style = 3)
+
+t1 <- Sys.time()
+for(i in 1: N){
+  for(this_t in seq_along(t)){
+    df_it <- df_subj_re %>% filter(id==i & t == t[this_t])
+    
+    # observed slope
+    obs_beta <- coef(lm(Y2~Y1, data = df_it))["Y1"]
+    
+    # permutation 
+    beta_perm <- rep(NA, M)
+    for(m in 1:M){
+      df_it_m <- df_it
+      df_it_m$Y2_perm <- sample(df_it_m$Y2) # shuffle Y2, fix Y1
+      beta_perm[m] <- coef(lm(Y2_perm~Y1, data = df_it_m))["Y1"]
+    }
+    
+    pval_mat_re[i, this_t] <- sum(beta_perm>obs_beta)/M
+    
+  }
+  
+  setTxtProgressBar(pb, i)
+  
+  
+}
+t2 <- Sys.time()
+close(pb)
+```
+
+The permutation rest took `r round(t2-t1, 2)` seconds. 
+
+```{r}
+data.frame(t = t, 
+           type1err= apply(pval_mat_re < 0.05, 2, mean))
 ```
 
 ## GLS with spatial correlation
 
-- Let's fit GLS model to account for spatial correlation
-
-```{r, error=TRUE, class.source='fold-show'}
-df_subj2 %>% filter(id==1 & t==0.2) %>% 
-  gls(Y2~Y1, data = .,
-      correlation = corGaus(value=0.2, ~s1+s2))
-```
-
-Because the original data size is too large for nlme::gls to handle, I have reduced the spatial grid size to 32 by 32 (taking the 8th, 16th, 24th,... point along both axis).
-
-
-```{r}
-# reduce grid
-reduce_sid <- seq(0, 256, by = 8)
-df_subj2 <- df_subj2 %>% filter(sid1 %in% reduce_sid & sid2 %in% reduce_sid)
-```
 
 ```{r ci_func_gls}
-beta_ci_gls <- function(x){
+gls_beta_pval <- function(x){
   fit_gls <- gls(Y2~Y1, data = x, correlation = corGaus(value=0.2, ~s1+s2))
   beta1 <- coef(fit_gls)["Y1"] 
-  ci <- confint(fit_gls)["Y1", ]
+  pval <- summary(fit_gls)$tTable["Y1", "p-value"]
   
-  return(data.frame(beta1 = beta1, cil = ci[1], ciu = ci[2]))
+  return(data.frame(beta1 = beta1, pval = pval))
 }
 ```
 
 ```{r, cache=TRUE}
 t1 <- Sys.time()
-df_subj2 %>% group_by(id, t) %>%
-  group_modify(~beta_ci_gls(.)) %>%
-  mutate(true_beta1 = 2*t) %>% 
-  mutate(cover = (cil <= true_beta1 & ciu >= true_beta1)) %>%
-  group_by(t) %>%
-  summarise(cov_rate = mean(cover))
+df_gls_pval <- df_subj_re %>%
+  # filter(id==1) %>%
+  # group_by(t) %>%
+  group_by(id, t) %>%
+  group_modify(~gls_beta_pval(.)) 
 t2 <- Sys.time()
 ```
 
-The GLS process for all subjects at all time points on reduced data took `r round(t2-t1, 3)` hours. 
-
-Compare this coverage rate with regular LM coverage rate on reduced data: 
-
 ```{r}
-df_subj2 %>% group_by(id, t) %>%
-  group_modify(~get_beta_ci(.)) %>%
-  mutate(true_beta1 = 2*t) %>% 
-  mutate(cover = (cil <= true_beta1 & ciu >= true_beta1)) %>%
-  group_by(t) %>%
-  summarise(cov_rate = mean(cover)) 
+# %>%
+  # mutate(reject = (pval <= 0.05)) #%>%
+#   group_by(t) %>%
+#   summarise(type1err = mean(reject))
+
 ```
+
+The GLS process for all subjects at all time points on reduced data took `r round(t2-t1, 3)` hours. 
 
 
 
