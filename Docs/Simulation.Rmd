@@ -228,7 +228,7 @@ I followed this [reference](https://bookdown.org/curleyjp0/psy317l_guides5/permu
 
 ```{r perm_test, class.source='fold-show', results='hide', cache=TRUE}
 
-M <- 100 # number of permutation
+M <- 1000 # number of permutation
 pval_mat <- matrix(NA, nrow = N, ncol = nT)
 pb <- txtProgressBar(min = 0, max=N, style = 3)
 
@@ -296,7 +296,7 @@ df_subj_re %>% group_by(id, t) %>%
 
 ```{r, class.source='fold-show', results='hide', cache=TRUE}
 
-M <- 100 # number of permutation
+M <- 1000 # number of permutation
 pval_mat_re <- matrix(NA, nrow = N, ncol = nT)
 pb <- txtProgressBar(min = 0, max=N, style = 3)
 
@@ -359,11 +359,10 @@ t2 <- Sys.time()
 ```
 
 ```{r}
-# %>%
-  # mutate(reject = (pval <= 0.05)) #%>%
-#   group_by(t) %>%
-#   summarise(type1err = mean(reject))
-
+df_gls_pval %>% 
+  mutate(reject = (pval <= 0.05)) %>%
+  group_by(t) %>%
+  summarise(type1err = mean(reject)) 
 ```
 
 The GLS process for all subjects at all time points on reduced data took `r round(t2-t1, 3)` hours. 
