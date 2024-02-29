@@ -296,9 +296,100 @@ data.frame(t = t, reject = apply(pval_mat < 0.05, 1, mean))
 
 This false rejection rates are exactly the same as linear regression! This is saying the permutation test didn't do anything. Permutation test is robust against non-normality of the outcome. In this case, the outcome is indeed normal. 
 
-What about bootstrap? 
+Adding spatial index and interaction did not help with the type I error a lot. Only slightly. 
+
+### Can I made permutation test robust against spatial correlation
+
+If I include all subjects at a specific time point. I'd fix the location index and permute only across subject. In this case I'll achieve a p-value at each time and location.
+
+```{r, class.source='fold-show', results='hide'}
+df_subj$sp_id <- rep(1:nS^2, N*nT)
+# length(rep(1:nS^2, N*nT))
+
+# number of permutation
+M <- 1000 
+# containers
+obs_T_mat <- obs_beta_mat <- array(NA, dim = c(length(t), nS^2)) # dims: time, location
+T_mat <- beta_mat <- array(NA, dim = c(length(t), nS^2, M)) # dims: time, subject, permutation
+
+# permutation
+
+pb <- txtProgressBar(0, nS^2, style = 3)
+t1 <- Sys.time()
+
+for(sid in 1: nS^2){
+  for(tid in seq_along(t)){
+    this_t <- t[tid]
+    df_spt <- df_subj %>% filter(sp_id==sid & t==this_t)
+    
+    # observed 
+    this_lm <- summary(lm(Y2~Y1, data = df_spt))$coefficients
+    obs_T_mat[tid, sid] <- this_lm["Y1", "t value"]
+    obs_beta_mat[tid, sid] <- this_lm["Y1", "Estimate"]
+  
+    # permutation 
+    for(m in 1:M){
+      df_spt_m <- df_spt
+      df_spt_m$Y2_perm <- sample(df_spt_m$Y2) # shuffle Y2, fix Y1
+      perm_lm <-  summary(lm(Y2_perm~Y1, data = df_spt_m))$coefficients
+      T_mat[tid, sid, m] <- perm_lm["Y1", "t value"]
+      beta_mat[tid, sid, m] <- perm_lm["Y1", "Estimate"]
+    }
+
+  }
+  
+  setTxtProgressBar(pb, sid)
+
+}
+t2 <- Sys.time()
+close(pb)
+```
+
+```{r, fig.height=3, fig.width=15}
+data.frame(
+  time = t,
+  obs_T = obs_T_mat[,1], 
+  T_mat[,1,]) %>%
+  pivot_longer(starts_with("X"), names_prefix = "X") %>%
+  ggplot()+
+  geom_histogram(aes(x=value), bins = 30)+
+  geom_vline(aes(xintercept = obs_T), col = "red")+
+  facet_grid(cols = vars(time))+
+  labs(title = "T statistics")
+```
+
+
+```{r, fig.height=3, fig.width=15}
+data.frame(
+  time = t,
+  obs_beta = obs_beta_mat[,1], 
+  beta_mat[,1,]) %>%
+  pivot_longer(starts_with("X"), names_prefix = "X") %>%
+  ggplot()+
+  geom_histogram(aes(x=value), bins = 30)+
+  geom_vline(aes(xintercept = obs_beta), col = "red")+
+  facet_grid(cols = vars(time))+
+  labs(title = "Slope estimates")
+
+```
+
+
+```{r}
+# using t statistics
+pval_mat <- matrix(NA, nT, N)
+for(i in 1:N){
+  for(j in 1:nT){
+    pval_mat[j, i] <- mean(abs(T_mat[j, i, ]) > abs(obs_T_mat[j, i]))
+  }
+}
+
+data.frame(t = t, reject = apply(pval_mat < 0.05, 1, mean))
+```
+
 
 ## Bootstrap
+
+I wanna try bootstrap test
 
 ```{r bootstrap, results='hide'}
 obs_T_mat2 <- obs_beta_mat2 <- array(NA, dim = c(length(t), N)) # dims: time, subject
@@ -351,8 +442,6 @@ data.frame(
 ```
 
 ```{r}
-
-
 # using slope
 pval_mat2 <- matrix(NA, nT, N)
 for(i in 1:N){
@@ -377,7 +466,7 @@ gls_beta_pval <- function(x){
 }
 ```
 
-```{r, cache=TRUE}
+```{r, cache=TRUE, eval=FALSE}
 t1 <- Sys.time()
 df_gls_pval <- df_subj %>%
   # filter(id %in% 1:10) %>%
@@ -387,7 +476,7 @@ df_gls_pval <- df_subj %>%
 t2 <- Sys.time()
 ```
 
-```{r}
+```{r, eval=FALSE}
 # bind_rows(df_pls_pval) %>%
 #   mutate(t = rep(t, each = 10)) %>%
 df_gls_pval %>% 
@@ -396,6 +485,43 @@ df_gls_pval %>%
   summarise(type1err = mean(reject)) 
 ```
 
-The GLS process for all subjects at all time points on reduced data took `r round(t2-t1, 3)` hours. 
+<!-- The GLS process for all subjects at all time points on reduced data took `r round(t2-t1, 3)` hours.  -->
+
+<!-- What if I fit GLS on the whole dataset and do permutation test? The whole dataset takes a really long time to fit, so here I'll start with 10 subject at a single time point.  -->
+
+<!-- ```{r} -->
+<!-- t1 <- Sys.time() -->
+<!-- fit_gls <- df_subj %>%  -->
+<!--   filter(id %in% 1:10) %>% -->
+<!--   filter(t==0.2) %>%  -->
+<!--   mutate(id <- as.factor(id)) %>% -->
+<!--   gls(Y2~Y1, data = ., correlation = corGaus(value=0.2, ~s1+s2|id)) -->
+<!-- t2 <- Sys.time() -->
+
+<!-- # t2-t1 -->
+<!-- summary(fit_gls) -->
+<!-- ``` -->
+<!-- The model for 10 subjects took 9 min to fit. Y1 is not significant.  -->
+
+<!-- ## LME -->
+
+<!-- What if I account for the effect of space, using spatial effect as a random effect? -->
+
+<!-- $$Y_{2i}(s_1, s_2, t) =\beta_0 +\beta_1 Y_{1i}(s_1, s_2, t)+b_{0i}+b_{1i}s_1+b_{2i}s_2+b_{3i}t+\epsilon_i(s_1, s_2, t)$$ -->
 
 
+<!-- ```{r} -->
+<!-- t1 <- Sys.time() -->
+<!-- fit_lme <- df_subj %>%  -->
+<!--   filter(id %in% 1:10) %>% -->
+<!--   filter(t==0.2) %>%  -->
+<!--   mutate(id <- as.factor(id)) %>% -->
+<!--   lme(fixed = Y2~Y1, random = ~s1+s2|id, data = ., correlation = corGaus(value=0.2, ~s1+s2|id)) -->
+<!-- t2 <- Sys.time() -->
+<!-- ``` -->
+
+
+<!-- ```{r} -->
+<!-- summary(fit_lme) -->
+<!-- ``` -->
+<!-- Even here, Y1 has a significant relationship with Y2, though the estimate of slope is very very small.  -->
