@@ -211,8 +211,8 @@ df_subj %>%
 This type I error is very high! It almost always reject the null hypothesis even thought it is true.
 
 From now on there are two ways we can think about this problem:
-1. Still conditioning on time and subject, boostrap over space
-2. Pool space and time, fit lme, do permutation/bootstrap test
+1. Still conditioning on time and subject, bootstrap over space
+2. Pool space and time, fit a model accounting for time/spatial correlation, do permutation/bootstrap test
 
 
 ## Conditional boostrap
@@ -371,9 +371,168 @@ data.frame(t = t, typeIerror = apply(block_boot_reject_mat, 1, mean))
 
 Looks like the block bootstrap also didn't do much. The type I error only increased a little bit. 
 
-I am starting to think it is not possible to improve type I error based on simple linear regression. It is necessary to account for spatial effect in the model. The GLS with Gaussian spatial error took too long, so I would like to start with a mixed model. 
+I am starting to think it is not possible to improve type I error based on simple linear regression. It is necessary to account for spatial effect in the model in some way. I can think of two courses around this:
 
-If we continue to fix time and subject, I am not sure what we can do. If we 
+1) Spatial correlation matrix of error term. This can be very, very time consuming.
+2) Complex spatial random effects.
+
+
+
+Even if accounting for spatial correlation below, the model still leads to false rejection. 
+
+## Additive model
+
+What if we introduce very complex spatial effect using spline basis? Let's fit a gam model for each subject at each time point. This does not fit in either of the two ways I mentioned above, because this model incorporate complex fixed effect, not individual-level random effect for spatial indices.
+
+Model formula as below:
+
+$$E[Y_{2i}(s_1, s_2|t)]=\beta_{0it}+\beta_{1it}Y_{1i}(s_1, s_2|t)+f_{it}(s_1)+f_{it}(s_2)+g_{it}(s_1, s_2)$$
+
+
+
+```{r bam}
+t1 <- Sys.time()
+all_fit_bam <- df_subj %>%
+  # filter(id %in% 1:5) %>% 
+  group_by(id, t) %>%
+  group_modify(~{fit_bam <- bam(Y2 ~ Y1+s(s1, k=20)+s(s2, k=20)+ti(s1,s2, k=10), data = .x, 
+                                family = gaussian, 
+                                method = "fREML", discrete = TRUE)
+                 data.frame(beta_est = fit_bam$coefficients["Y1"],
+                            pval = summary(fit_bam)$p.pv["Y1"])})
+t2 <- Sys.time()
+```
+
+
+```{r, fig.height=3, fig.width=15, eval=FALSE}
+all_fit_bam %>%
+  mutate(cutoff = 0.05) %>%
+  ggplot()+
+  geom_histogram(aes(x=pval), bins = 30)+
+  geom_vline(aes(xintercept = cutoff, col = "p=0.05"))+
+  facet_grid(cols = vars(t))+
+  labs(title = "P values")
+```
+
+```{r, eval=FALSE}
+all_fit_bam %>%
+  mutate(reject=pval< 0.05) %>%
+  group_by(t) %>% 
+  summarize(typeIerror=mean(reject))
+```
+
+Time: `r t2-t1`
+
+Here, I realized the type I error from BAM is slightly worse than GAM (of course the model fits much faster). What are the reasons behind this? Is it because the unbiased variance estimates from fREML is in fact larger? 
+
+#### BAM with complex spatial random effect
+
+I want to include random slope for spatial indices and their interaction. But how can I include a random effect for interaction? 
+
+```{r bam_int, results='hide', class.source='fold-show'}
+all_fit_bam_sp <- expand_grid(id = 1:N, t=t)
+all_fit_bam_sp$beta_est <- all_fit_bam_sp$pval <- NA
+
+t1 <- Sys.time()
+
+pb <- txtProgressBar(0, N, 0, style=3)
+for(i in 1:N){
+  for(this_t in t){
+    this_df <- df_subj %>% filter(id==i & t==this_t)
+    bam_it <- bam(Y2 ~ Y1+s(s1, k=20)+s(s2, k=20)+ti(s1,s2, k=10)+
+                    s(id, by=s1, bs="re")+s(id, by=s2, bs="re")+
+                    s(id, by=I(s1*s2), bs="re"),
+                  data = this_df, family = gaussian, 
+                  method = "fREML", discrete = TRUE)
+    sum_it <- summary(bam_it)
+    all_fit_bam_sp[all_fit_bam_sp$id==i & all_fit_bam_sp$t==this_t, "beta_est"] <- sum_it$p.coeff["Y1"]
+    all_fit_bam_sp[all_fit_bam_sp$id==i & all_fit_bam_sp$t==this_t, "pval"] <- sum_it$p.pv["Y1"]
+  }
+  
+  setTxtProgressBar(pb, i)
+}
+t2 <- Sys.time()
+
+close(pb)
+```
+
+
+```{r, fig.height=3, fig.width=15, eval=FALSE}
+all_fit_bam_sp %>%
+  mutate(cutoff = 0.05) %>%
+  ggplot()+
+  geom_histogram(aes(x=pval), bins = 30)+
+  geom_vline(aes(xintercept = cutoff, col = "p=0.05"))+
+  facet_grid(cols = vars(t))+
+  labs(title = "P values")
+```
+
+
+```{r}
+all_fit_bam_sp %>%
+  mutate(reject=pval< 0.05) %>%
+  group_by(t) %>% 
+  summarize(typeIerror=mean(reject))
+```
+It looks like adding random effects did not make any difference? 
+
+## GAMM
+
+From here on, we explore the route of spatially-correlated error. The full sample takes too much time to run, so I am only presenting one subject as an example. 
+
+```{r gam, cache=TRUE, class.source='fold-show', eval=FALSE}
+all_fit_gamm <- expand_grid(id = 1:10, t=t)
+all_fit_gamm$beta_est <- all_fit_gamm$pval <- NA
+
+t1 <- Sys.time()
+pb <- txtProgressBar(0, N, 0, style=3)
+
+for(i in 1:10){
+  for(this_t in t){
+    
+    df_it <- df_subj %>% filter(id==i & t==this_t)
+    gamm_it <- gamm(Y2~Y1+s(s1)+s(s2)+ti(s1,s2), 
+                    correlation = corExp(value=0.2, form = ~ s1+s2|1),
+                    data = df_it)
+    sum_it <- summary(gamm_it$gam)
+    all_fit_gamm[all_fit_gamm$id==i & all_fit_gamm$t==this_t, "beta_est"] <- sum_it$p.coeff["Y1"]
+    all_fit_gamm[all_fit_gamm$id==i & all_fit_gamm$t==this_t, "pval"] <- sum_it$p.pv["Y1"]
+    
+    
+  }
+  
+  setTxtProgressBar(pb, i)
+}
+t2 <- Sys.time()
+
+close(pb)
+
+# summary(fit_gamm$lme)
+```
+
+PS: LME cannot deal with single group
+
+```{r, eval=FALSE}
+all_fit_gamm %>%
+  mutate(reject=pval< 0.05) %>%
+  group_by(t) %>% 
+  summarize(typeIerror=mean(reject, na.rm=T))
+```
+
+
+```{r}
+t1 <- Sys.time()
+df_it <- df_subj %>% filter(id==i & t==this_t)
+gamm_it <- gamm(Y2~Y1+s(s1)+s(s2)+ti(s1,s2), 
+                correlation = corExp(value=0.2, form = ~ s1+s2|1),
+                data = df_it)
+t2 <- Sys.time()
+
+summary(gamm_it$gam)
+summary(gamm_it$lme)
+```
+
+Time: `r t2-t1`
 
 
 ## GLS
@@ -399,35 +558,6 @@ all_fit_gls%>%
   summarize(typeIerror=mean(reject))
 ```
 
-
-Even if accounting for spatial correlation below, the model still leads to false rejection. 
-
-## GAM
-
-What if we introduce very complex spatial effect using spline basis? Let's fit a gam model for each subject at each time point. Model formula as below:
-
-$$Y_{2i}(s_1, s_2|t)=\beta_{0it}+\beta_{1it}Y_{1i}(s_1, s_2|t)+f_{it}(s_1)+f_{it}(s_2)+g_{it}(s_1, s_2)$$
-
-
-
-```{r gam, cache=TRUE}
-t1 <- Sys.time()
-all_fit_gam <- df_subj %>%
-  group_by(id, t) %>%
-  group_modify(~{fit_gam <- gam(Y2 ~ Y1+s(s1, k = 20)+s(s2, k = 20) + ti(s1, s2, k = 20), data = .x)
-                 data.frame(beta_est = fit_gam$coefficients["Y1"],
-                            pval = summary(fit_gam)$p.pv["Y1"])})
-t2 <- Sys.time()
-```
-
-```{r}
-all_fit_gam %>%
-  mutate(reject=pval< 0.05) %>%
-  group_by(t) %>% 
-  summarize(typeIerror=mean(reject))
-```
-
-Time: `r t2-t1` hours
 
 # Inference pooling over time and subject
 
@@ -459,27 +589,46 @@ The permutation test of this model would be the Freedman-Lane procedure as Amy t
 
 ## GAM with very flexible spatial effect
 
-Anyways, let's try to fit a flexible model first. This is actually a very complicated problem. I think I need to create the design maatrix first and then fit an LME
+Anyways, let's try to fit a flexible mixed model without accounting for spatial correlation
 
-```{r}
-# set up design matrix
-
-```
+$$Y_{1i}(s_1, s_2, t)=\beta_0+\beta_1Y_{2i}(s_1, s_2, t)+f(s_1, s_2) + g(t) + b_{i1}s_1+b_{i2}s_2+b_{i3}s_1s_2+b_{i4}t$$
 
 
 ```{r, error=TRUE, class.source='fold-show'}
 df_subj$id <- as.factor(df_subj$id)
-unique(df_subj$id)
-gamm_pool <- gamm4(Y2~s(Y1)+t2(s1, s2)+s(t, k=3), 
-      random = ~(s1+s2+t|id),
-      data = df_subj)
-# 
-# gam_pool <- gam(Y2~s(Y1)+t2(s1, s2)+s(t, k=3)+
-#                   s(id, t, by=s1, bs="re")+
-#                   s(id, t, by=s2, bs="re")+
-#                   s(id, by=t, bs="re", k=3), 
-#                 data = df_subj)
-summary(gamm_pool)
+t1 <- Sys.time()
+gam_pool <- bam(Y2~Y1+s(s1)+s(s2)+ti(s1, s2)+s(t, k=3)+
+                   s(id, by=s1, bs="re")+s(id, by=s2, bs="re")+s(id, by = I(s1*s2), bs="re")+
+                   s(id, by=t, bs="re"), 
+                family = gaussian,
+                method = "fREML",
+                discrete = TRUE,
+                data = df_subj)
+t2 <- Sys.time() 
+
+summary(gam_pool)
 ```
 
+Time: `r t2-t1`
+
 Looks like this model is still not sufficient enough to identify the null effect of $Y_1$. 
+
+## GAMM with spatial correlation
+
+Can I also add a spatial correlation to this model? I am experimenting only over 5 subjects. 
+
+```{r, error=TRUE, class.source='fold-show', cache=TRUE, eval=FALSE}
+t1 <- Sys.time()
+gamm_pool <- gamm(Y2~Y1+t2(s1, s2) +
+                        s(t, k=3)+
+                       s(id, by=s1, bs = "re")+
+                       s(id, by=s2, bs = "re")+
+                       s(id, by=I(s1*s2), bs="re")+
+                       s(id, by=t, bs="re"),
+                      correlation = corExp(value=0.2, form = ~s1+s2|id/t), 
+      data = df_subj %>% filter(id %in% 1:5))
+t2 <- Sys.time() 
+
+
+summary(gamm_pool_int_sp$gam)
+```
