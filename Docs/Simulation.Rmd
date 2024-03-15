@@ -27,6 +27,10 @@ library(ggpubr)
 library(here)
 library(gamm4)
 
+```
+
+
+```{r source_code}
 source(here("Code/RandomField.R"))
 ```
 
@@ -59,11 +63,6 @@ where:
 - $Z(\mathbf{s'}, t)$ is a white noise process
 
 
-4. The second outcome is generated from the first outcome, and the correlation is time-varying
-
-$$Y'_i(\mathbf{s},t) = \beta_i(t)Y_i(\mathbf{s},t) + b'_i(\mathbf{s},t) + \epsilon_i(\mathbf{s}, t)$$
-
-
 # Generate data under the null assumption
 
 Follow up on last time, we would like to generate data from the null hypothesis where $Y_1$, $Y_2$ are not correlated with each other. We will use a few methods to test their association and calculate the type I error.
@@ -73,10 +72,13 @@ We generate data from the following scheme:
 $$\begin{aligned}
 Y_{1i}(s_1, s_2, t) &=\xi_{i1}\phi(s_1, s_2)+\xi_{i2}t+\epsilon_{1i}(s_1, s_2, t) \\
 Y_{2i}(s_1, s_2, t) &=\zeta_{i1}\phi(s_1, s_2)+\zeta_{i2}t+\epsilon_{2i}(s_1, s_2, t) \\
-\xi_{ik}, \zeta_{ik} & \sim N(0, 1) \\
+\xi_{ik}, \zeta_{ik} & \sim_{i.i.d} N(0, 1) \\
 \end{aligned}$$
 
-and $\epsilon_{i1}$, $\epsilon_{i2}$ are moving average generated from different kernal size: $r_1=5$, $r_2=3$.    
+
+- $(s_1, s_2)$ are spatial coordinates on a 32 by 32 2D image; t is the time of measurement (t = 0.2, 0.4,...,1)
+- $\epsilon_{i1}$, $\epsilon_{i2}$ are moving average generated from different kernel/neighborhood size: $r_1=5$, $r_2=3$.    
+- $\phi_1(s_1, s_2)$ is the standardized Euclidean distance from image center: $\phi(s_1, s_2) = \sqrt{(s_1-c_1)^2+(s_2-c_2)^2}$
 
 
 ```{r grid}
@@ -161,21 +163,14 @@ df_subj %>%
   ggplot()+
   geom_tile(aes(x=s1, y=s2, fill = value))+
   facet_grid(cols=vars(t), rows = vars(name))+
-  labs(title = "Outcome")
+  labs(title = "Generated data of subject ID = 15")
 ```
 
-```{r}
-# score of Y1
-true_xi[15, ]
-
-# score of Y2
-true_zeta[15, ]
-```
-
-From the last meeting, we know that premutation test is not robust against spatial correlation and does no better than regular linear regression. So this time, we would like to try bootstrap instead.
+The random effects for this subjects are `r round(true_xi[15, ], 2)` for $Y_1$ and `r round(true_zeta[15, ], 2)` for $Y_2$
 
 # Inference conditioning on time and subject
 
+In this section, we will fit a model for each subject at each time point, test the slope of $Y_2$ over $Y_1$, and calculated the propostion of false rejection (type I error).
 
 ## LM
 
@@ -187,12 +182,12 @@ df_subj %>%
   geom_smooth(formula = 'y~x', method = "lm")+
   stat_cor(method = "pearson")+
   facet_grid(rows = vars(id), cols = vars(t))+
-  labs(title = "Correlation")
+  labs(title = "Perason correlation of four subject")
 ```
 
-We fit a simple model across space conditioning on each subject and time:
+We fit a simple linear model across space conditioning on each subject and time:
 
-$$Y_{2i}(\mathbf{s}|t) = \beta_{0ti}+\beta_{1ti}Y_{1i}(\mathbf{s}|t)+\epsilon_i(\mathbf{s}|t)$$
+$$Y_{2i}(\mathbf{s}|t) = \beta_{it0}+\beta_{it1}Y_{1i}(\mathbf{s}|t)+\epsilon_i(\mathbf{s}|t)$$
 
 ```{r}
 df_subj %>%
@@ -204,22 +199,20 @@ df_subj %>%
   }) %>%
   mutate(reject = pval < 0.05) %>%
   group_by(t) %>%
-  summarise_at("reject", mean)
+  summarise_at("reject", mean) %>%
+  rename(Time = "t", "Type I error" = reject) %>%
+  kable(table.attr = "style=\"color:black;\"") %>%
+  kable_styling(full_width = F)
 ```
 
 
 This type I error is very high! It almost always reject the null hypothesis even thought it is true.
 
-From now on there are two ways we can think about this problem:
-1. Still conditioning on time and subject, bootstrap over space
-2. Pool space and time, fit a model accounting for time/spatial correlation, do permutation/bootstrap test
-
-
 ## Conditional boostrap
 
-### Single pixel
+### Single pixel bootstrap
 
-Here, we still condition on time and subject. For each subject at each time point, we can sample with replacement either pixels or blocks of pixels, fit LM, find distribution of slope estimates and calculate p values.
+Here, we still condition on time and subject. For each subject at each time point, we can sample with replacement pixels across space.
 
 ```{r bootstrap_pixel, results='hide', cache=TRUE}
 M <- 1000 # number of boostraps
@@ -285,14 +278,17 @@ for(i in 1:N){
   }
 }
 
-data.frame(t = t, typeIerror = apply(boot_reject_mat, 1, mean))
+data.frame(t = t, typeIerror = apply(boot_reject_mat, 1, mean)) %>%
+  rename(Time = "t", "Type I error" = "typeIerror") %>%
+  kable(table.attr = "style=\"color:black;\"") %>%
+  kable_styling(full_width = F)
 ```
 
-Bootstrap single pixel did not do anything to improve type I error. This is probably for the same reason of permutation-spatial correlation is broken when sample with replacement. 
+Bootstrap single pixel did not do anything to improve type I error. Just like permutation test, sampling single pixels across space would break the spatial correlation in the data, which explains the high type I erorr and the fact that it is no better than simple linear regression. 
 
-### Block
+### Block bootstrap
 
-I'd like to sample 4 by 4 block of pixels. For now, the block size needs to be the divisor of image size, because I am not sure what to do with the edge blocks otherwise. 
+Here in the bootstrap procedure, we sample equal-size, non-overlapping 4 by 4 block of pixels, hoping to preserve some spatial correlation. 
 
 ```{r block_boot, results='hide', cache=TRUE}
 M <- 1000 # number of boostraps
@@ -366,70 +362,28 @@ for(i in 1:N){
   }
 }
 
-data.frame(t = t, typeIerror = apply(block_boot_reject_mat, 1, mean))
+data.frame(t = t, typeIerror = apply(block_boot_reject_mat, 1, mean)) %>%
+  rename(Time = "t", "Type I error" = "typeIerror") %>%
+  kable(table.attr = "style=\"color:black;\"") %>%
+  kable_styling(full_width = F)
 ```
 
-Looks like the block bootstrap also didn't do much. The type I error only increased a little bit. 
+Looks like the block bootstrap helped tiny little bit with the type I error, but far from satisfying. 
 
-I am starting to think it is not possible to improve type I error based on simple linear regression. It is necessary to account for spatial effect in the model in some way. I can think of two courses around this:
+I am starting to think it is not possible to improve type I error based on simple linear regression at specific time and subject. It is necessary to account for spatial effect in the model in some way. I can think of two courses around this:
 
 1) Spatial correlation matrix of error term. This can be very, very time consuming.
 2) Complex spatial random effects.
 
-
-
-Even if accounting for spatial correlation below, the model still leads to false rejection. 
-
 ## Additive model
 
-What if we introduce very complex spatial effect using spline basis? Let's fit a gam model for each subject at each time point. This does not fit in either of the two ways I mentioned above, because this model incorporate complex fixed effect, not individual-level random effect for spatial indices.
-
-Model formula as below:
-
-$$E[Y_{2i}(s_1, s_2|t)]=\beta_{0it}+\beta_{1it}Y_{1i}(s_1, s_2|t)+f_{it}(s_1)+f_{it}(s_2)+g_{it}(s_1, s_2)$$
+I started with the course of complex spatial random effect, using BAM to introduce complex spatial random effect, as well as complex fixed effects with spline basis. I want to include random slope for spatial indices and their interaction. The model formula is as follows: 
 
 
-
-```{r bam}
-t1 <- Sys.time()
-all_fit_bam <- df_subj %>%
-  # filter(id %in% 1:5) %>% 
-  group_by(id, t) %>%
-  group_modify(~{fit_bam <- bam(Y2 ~ Y1+s(s1, k=20)+s(s2, k=20)+ti(s1,s2, k=10), data = .x, 
-                                family = gaussian, 
-                                method = "fREML", discrete = TRUE)
-                 data.frame(beta_est = fit_bam$coefficients["Y1"],
-                            pval = summary(fit_bam)$p.pv["Y1"])})
-t2 <- Sys.time()
-```
+$$E[Y_{1i}(s_1, s_2|t)]=\beta_{it0}+\beta_{it1}Y_{2i}(s_1, s_2|t)+f_i(s_1, s_2) + b_{it0}+ b_{it1}s_1+b_{it2}s_2+b_{it3}s_1s_2$$
 
 
-```{r, fig.height=3, fig.width=15, eval=FALSE}
-all_fit_bam %>%
-  mutate(cutoff = 0.05) %>%
-  ggplot()+
-  geom_histogram(aes(x=pval), bins = 30)+
-  geom_vline(aes(xintercept = cutoff, col = "p=0.05"))+
-  facet_grid(cols = vars(t))+
-  labs(title = "P values")
-```
-
-```{r, eval=FALSE}
-all_fit_bam %>%
-  mutate(reject=pval< 0.05) %>%
-  group_by(t) %>% 
-  summarize(typeIerror=mean(reject))
-```
-
-Time: `r t2-t1`
-
-Here, I realized the type I error from BAM is slightly worse than GAM (of course the model fits much faster). What are the reasons behind this? Is it because the unbiased variance estimates from fREML is in fact larger? 
-
-#### BAM with complex spatial random effect
-
-I want to include random slope for spatial indices and their interaction. But how can I include a random effect for interaction? 
-
-```{r bam_int, results='hide', class.source='fold-show'}
+```{r bam_int, results='hide'}
 all_fit_bam_sp <- expand_grid(id = 1:N, t=t)
 all_fit_bam_sp$beta_est <- all_fit_bam_sp$pval <- NA
 
@@ -438,10 +392,11 @@ t1 <- Sys.time()
 pb <- txtProgressBar(0, N, 0, style=3)
 for(i in 1:N){
   for(this_t in t){
-    this_df <- df_subj %>% filter(id==i & t==this_t)
+    this_df <- df_subj %>% filter(id==i & t==this_t) %>%
+      mutate(s_int = s1*s2) # create interaction between spatial indices
     bam_it <- bam(Y2 ~ Y1+s(s1, k=20)+s(s2, k=20)+ti(s1,s2, k=10)+
                     s(id, by=s1, bs="re")+s(id, by=s2, bs="re")+
-                    s(id, by=I(s1*s2), bs="re"),
+                    s(id, by=s_int, bs="re"),
                   data = this_df, family = gaussian, 
                   method = "fREML", discrete = TRUE)
     sum_it <- summary(bam_it)
@@ -472,163 +427,13 @@ all_fit_bam_sp %>%
 all_fit_bam_sp %>%
   mutate(reject=pval< 0.05) %>%
   group_by(t) %>% 
-  summarize(typeIerror=mean(reject))
-```
-It looks like adding random effects did not make any difference? 
-
-## GAMM
-
-From here on, we explore the route of spatially-correlated error. The full sample takes too much time to run, so I am only presenting one subject as an example. 
-
-```{r gam, cache=TRUE, class.source='fold-show', eval=FALSE}
-all_fit_gamm <- expand_grid(id = 1:10, t=t)
-all_fit_gamm$beta_est <- all_fit_gamm$pval <- NA
-
-t1 <- Sys.time()
-pb <- txtProgressBar(0, N, 0, style=3)
-
-for(i in 1:10){
-  for(this_t in t){
-    
-    df_it <- df_subj %>% filter(id==i & t==this_t)
-    gamm_it <- gamm(Y2~Y1+s(s1)+s(s2)+ti(s1,s2), 
-                    correlation = corExp(value=0.2, form = ~ s1+s2|1),
-                    data = df_it)
-    sum_it <- summary(gamm_it$gam)
-    all_fit_gamm[all_fit_gamm$id==i & all_fit_gamm$t==this_t, "beta_est"] <- sum_it$p.coeff["Y1"]
-    all_fit_gamm[all_fit_gamm$id==i & all_fit_gamm$t==this_t, "pval"] <- sum_it$p.pv["Y1"]
-    
-    
-  }
-  
-  setTxtProgressBar(pb, i)
-}
-t2 <- Sys.time()
-
-close(pb)
-
-# summary(fit_gamm$lme)
-```
-
-PS: LME cannot deal with single group
-
-```{r, eval=FALSE}
-all_fit_gamm %>%
-  mutate(reject=pval< 0.05) %>%
-  group_by(t) %>% 
-  summarize(typeIerror=mean(reject, na.rm=T))
+  summarize(typeIerror=mean(reject))%>%
+  rename(Time = "t", "Type I error" = "typeIerror") %>%
+  kable(table.attr = "style=\"color:black;\"") %>%
+  kable_styling(full_width = F)
 ```
 
 
-```{r}
-t1 <- Sys.time()
-df_it <- df_subj %>% filter(id==i & t==this_t)
-gamm_it <- gamm(Y2~Y1+s(s1)+s(s2)+ti(s1,s2), 
-                correlation = corExp(value=0.2, form = ~ s1+s2|1),
-                data = df_it)
-t2 <- Sys.time()
+This is the best type I error we've got so far, but still much greater than the nominal value of 5%. 
 
-summary(gamm_it$gam)
-summary(gamm_it$lme)
-```
-
-Time: `r t2-t1`
-
-
-## GLS
-
-```{r gls, cache=TRUE}
-t1 <- Sys.time()
-all_fit_gls <- df_subj %>%
-  # filter(id%in%1:10) %>%
-  group_by(id, t) %>%
-  group_modify(~{fit_gls <- gls(Y2~Y1, data = .x,
-                                correlation = corExp(value = 0.2, form = ~s1+s2))
-                 data.frame(beta_est = fit_gls$coefficients["Y1"],
-                            pval = summary(fit_gls)$tTable["Y1", "p-value"])})
-t2 <- Sys.time()
-```
-
-Time: `r t2-t1` hours
-
-```{r}
-all_fit_gls%>%
-  mutate(reject= pval< 0.05) %>%
-  group_by(t) %>% 
-  summarize(typeIerror=mean(reject))
-```
-
-
-# Inference pooling over time and subject
-
-If repeated models conditioning on time and subject does not reach the nominal value of type I error, would pooling over time and subject be better? We need to fit a model taking into account all the data, as well as spatial correlation and time dependence. 
-
-
-## LME
-
-```{r, error=TRUE, class.source='fold-show'}
-lme_pool <- lme(fixed = Y2~Y1+s1+s2+t, 
-                random = ~s1+s2+t|id,
-                data=df_subj,
-                correlation = corExp(value=0.2, form=~s1+s2|id))
-```
-
-The mixed model with spatial correlation was not able to fit. It also failed when we include the interaction of spatial index. 
-
-```{r lme_pool, error=TRUE, class.source='fold-show'}
-lme_pool <- lme(fixed = Y2~Y1+s1+s2+t, 
-                random = ~s1+s2+t|id,
-                data=df_subj)
-summary(lme_pool)
-```
-
-This model clearly leads to the false rejection of $Y_1$ and the false acceptance of space and time index.
-
-The permutation test of this model would be the Freedman-Lane procedure as Amy talked about. However, I doubt a linear effect would be enough for the complex spatial correlation as in this data. I am not sure if bootstrap/permutation of extremely flexible model would work. 
-
-
-## GAM with very flexible spatial effect
-
-Anyways, let's try to fit a flexible mixed model without accounting for spatial correlation
-
-$$Y_{1i}(s_1, s_2, t)=\beta_0+\beta_1Y_{2i}(s_1, s_2, t)+f(s_1, s_2) + g(t) + b_{i1}s_1+b_{i2}s_2+b_{i3}s_1s_2+b_{i4}t$$
-
-
-```{r, error=TRUE, class.source='fold-show'}
-df_subj$id <- as.factor(df_subj$id)
-t1 <- Sys.time()
-gam_pool <- bam(Y2~Y1+s(s1)+s(s2)+ti(s1, s2)+s(t, k=3)+
-                   s(id, by=s1, bs="re")+s(id, by=s2, bs="re")+s(id, by = I(s1*s2), bs="re")+
-                   s(id, by=t, bs="re"), 
-                family = gaussian,
-                method = "fREML",
-                discrete = TRUE,
-                data = df_subj)
-t2 <- Sys.time() 
-
-summary(gam_pool)
-```
-
-Time: `r t2-t1`
-
-Looks like this model is still not sufficient enough to identify the null effect of $Y_1$. 
-
-## GAMM with spatial correlation
-
-Can I also add a spatial correlation to this model? I am experimenting only over 5 subjects. 
-
-```{r, error=TRUE, class.source='fold-show', cache=TRUE, eval=FALSE}
-t1 <- Sys.time()
-gamm_pool <- gamm(Y2~Y1+t2(s1, s2) +
-                        s(t, k=3)+
-                       s(id, by=s1, bs = "re")+
-                       s(id, by=s2, bs = "re")+
-                       s(id, by=I(s1*s2), bs="re")+
-                       s(id, by=t, bs="re"),
-                      correlation = corExp(value=0.2, form = ~s1+s2|id/t), 
-      data = df_subj %>% filter(id %in% 1:5))
-t2 <- Sys.time() 
-
-
-summary(gamm_pool_int_sp$gam)
-```
+I have also made attempts with GLS, GLMM and LME to include spatial correlation. However, all these models takes hours even days to fit. In fact, GLS couldn't accommodate a spatial correlation of this size. 
