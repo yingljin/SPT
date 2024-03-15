@@ -1,32 +1,55 @@
-# This script saves a function 
-# for a 2D moving-average square filter of white noise
-# and edges are filled with zero padding
+# This script saves function for a 2D moving-average square filter of white noise
 
-# k: filter size
-# Zmat: white noise image
+##### Simple average #####
 
-MA_rand_field <- function(k, Zmat){
-  
-  s1 <- nrow(Zmat)
-  s2 <- ncol(Zmat)
-  
-  
-  psize <- (k-1)/2 # padding size 
-  # add zero padding
-  pad_mat <- cbind(matrix(0, nrow = s1, ncol = psize),
-                   Zmat, 
-                   matrix(0, nrow = nrow(Zmat), ncol = psize)) # pad columns
-  pad_mat <- rbind(matrix(0, nrow = psize, ncol = ncol(pad_mat)),
-                   pad_mat, 
-                   matrix(0, nrow = psize, ncol = ncol(pad_mat)))
+# kf: filter size (odd number)
+# ki: image size
+# let's say both filter and image are squares at this point
+# Also, let's use only odd-size filters for now (borrowed from image analysis). 
+#   It has a center pixel which makes operation convenient 
+
+MA_rand_field <- function(kf, ki){
+
+  # generate a white noise image
+  # notice that this image is larger than the target image
+  # so that there is no need for padding
+  kz <- ki+2*(kf%/%2) # size of the white noise 
+  Zmat <- matrix(rnorm(kz^2, 0, 1), kz, kz)
   
   # moving average
-  ma_mat <- matrix(NA, s1, s2)
-  
-  for(i in 1:s1){
-    for(j in 1:s2){ 
+  ma_mat <- matrix(NA, ki, ki)
+  for(i in 1:ki){
+    for(j in 1:ki){ 
+      # simple zverage
+      ma_mat[i, j] <- mean(Zmat[j:(j+2*(kf%/%2)), i:(i+2*(kf%/%2))])
       
-      ma_mat[i, j] <- mean(pad_mat[i:(i+k-1), j:(j+k-1)])
+    }
+  }
+  
+  return(ma_mat)
+  
+}
+
+#### Wighted average #####
+
+# kf: filter size (odd number)
+# ki: image size
+# wt: weight matrix
+
+MWA_rand_field <- function(kf, ki, wt){
+  
+  # generate a white noise image
+  # notice that this image is larger than the target image
+  # so that there is no need for padding
+  kz <- ki+2*(kf%/%2) # size of the white noise 
+  Zmat <- matrix(rnorm(kz^2, 0, 1), kz, kz)
+  
+  # moving average
+  ma_mat <- matrix(NA, ki, ki)
+  for(i in 1:ki){
+    for(j in 1:ki){ 
+      # simple zverage
+      ma_mat[i, j] <- sum(Zmat[j:(j+2*(kf%/%2)), i:(i+2*(kf%/%2))]*wt)
       
     }
   }

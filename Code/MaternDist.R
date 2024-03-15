@@ -1,9 +1,5 @@
 # This script explores Matern family distribution
 
-library(spaMM)
-library(fields)
-library(geoR)
-library(tidyverse)
 
 
 #### Documentation ezample ####
