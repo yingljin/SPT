@@ -184,7 +184,7 @@ bind_rows(
 
 
 
-# Generate data under the null assumption
+# Effect of filter size on bivariate correlation testing
 
 Follow up on last time, we would like to generate data from the null hypothesis where $Y_1$, $Y_2$ are not correlated with each other. We will also remove any fixed/random effect, leaving only the moving average error, in case any unexpected correlation is induced
 
@@ -197,24 +197,16 @@ Y_{2i}(s_1, s_2, t) &=\epsilon_{2i}(s_1, s_2, t) \\
 
 
 - $(s_1, s_2)$ are spatial coordinates on a 32 by 32 2D image
-- $\epsilon_{i1}$, $\epsilon_{i2}$ are moving average generated from different kernel/neighborhood size: $r_1=5$, $r_2=3$.    
+- $\epsilon_{i1}$, $\epsilon_{i2}$ are moving average of a white noise field.    
 - In fact, in this case there is no point generating across time, because all time points have the same distribution. It would just be like repeating the same thing a few more times. That leaves us room for filter size and weight. 
 
-## Simple linear regression
 
-We fit a simple linear model across space conditioning on each subject and time:
-
-$$Y_{2i}(\mathbf{s}|t) = \beta_{it0}+\beta_{it1}Y_{1i}(\mathbf{s}|t)+\epsilon_i(\mathbf{s}|t)$$
-
-### Filter size
-
-```{r grid}
-# set up spcae-time grid
+```{r set-up}
+# set up space-time grid
 # generate a 2D image of 32 by 32
 nS <- 32
 N <- 100
 df_subj_k <- expand_grid(ksize = ksize_vec, id=1:N, s2=1:nS, s1 = 1:nS)
-## 32^2 = 1024 observations for each subject
 ```
 
 
@@ -270,6 +262,11 @@ df_subj_k %>%
   labs(title = "Generated data of subject ID = 15")
 ```
 
+## Simple linear regression
+
+We fit a simple linear model across space conditioning on each subject and time:
+
+$$Y_{2i}(\mathbf{s}|t) = \beta_{it0}+\beta_{it1}Y_{1i}(\mathbf{s}|t)+\epsilon_i(\mathbf{s}|t)$$
 
 ```{r, fig.height=12, fig.width=15}
 df_subj_k %>% 
@@ -294,244 +291,115 @@ df_subj_k %>%
   }) %>%
   mutate(reject = pval < 0.05) %>%
   group_by(ksize) %>%
-  summarise_at("reject", mean)# %>%
-  # rename(Time = "t", "Type I error" = reject) %>%
-  # kable(table.attr = "style=\"color:black;\"") %>%
-  # kable_styling(full_width = F)
+  summarise_at("reject", mean) %>%
+  rename("Filter size" = "ksize", "Type I error" = reject) %>%
+  kable(table.attr = "style=\"color:black;\"") %>%
+  kable_styling(full_width = F)
 ```
 
 
+## Block boostrap
+
+We hope to bootstrap non-overlapping blocks of pixels to preserve some degree of correlation. While the image may not be evenly divided by the block size, we try to make the expectation of image size constant, so that each block will be sampled with equal probability. For the re-sampled image, regardless of its size, we will fit a simple linear regression model for each subject and examine the significance of the slope. 
+
+- Let's only use square blocks for now.
+- Let's also fix the filter size at 5 for now. 
+
+PS. Originally, we wanted to set the resampling probability to be propotional to image size. But in fact, I think this approach couldn't make the expectation of the pixels as the same as the original image. It would keep the expected size of the sampled image unchanged if all blocks are sampled with equal probability. 
+
+Let's say the original image has N pixels and B blocks, and we want to resample a new image with also B blocks:
+
+$$E(N_{new}) = E(\sum_{b=1}^Bn_b^{new}) = \sum_{b=1}^BE(n_b^{new})=\sum_{b=1}^B\sum_{b=1}^Bn_bp_b = \sum_{b=1}^B\sum_{b=1}^B n_b\frac{n_b}{N}=B\frac{\sum_{b=1}^Bn_B^2}{N} $$
+If we set $p_b = 1/B$, then 
+
+$$E(N_{new}) = E(\sum_{b=1}^Bn_b^{new}) = \sum_{b=1}^BE(n_b^{new})=\sum_{b=1}^B\sum_{b=1}^Bn_bp_b = \sum_{b=1}^B\sum_{b=1}^B n_b\frac{1}{B})=\sum_{b=1}^B\frac{N}{B} = N $$
 
 
-<!-- ## Conditional boostrap -->
-
-<!-- ### Single pixel bootstrap -->
-
-<!-- Here, we still condition on time and subject. For each subject at each time point, we can sample with replacement pixels across space. -->
-
-<!-- ```{r bootstrap_pixel, results='hide', cache=TRUE} -->
-<!-- M <- 1000 # number of boostraps -->
-
-<!-- # sample single pixel -->
-<!-- obs_beta_mat <- array(NA, dim = c(nT, N)) # dims: time, subject -->
-<!-- boot_beta_mat <- array(NA, dim = c(nT, N, M)) # dims: time, subject, permutation -->
-
-<!-- # bootstrap -->
-<!-- pb <- txtProgressBar(0, N, style = 3) -->
-<!-- t1 <- Sys.time() -->
-
-<!-- for(i in 1: N){ -->
-<!--   for(tid in seq_along(t)){ -->
-<!--     this_t <- t[tid] -->
-<!--     df_it <- df_subj %>% filter(id==i & t==this_t) -->
-
-<!--     # observed  -->
-<!--     this_lm <- summary(lm(Y2~Y1, data = df_it))$coefficients -->
-<!--     obs_beta_mat[tid, i] <- this_lm["Y1", "Estimate"] -->
-
-<!--     # permutation  -->
-<!--     for(m in 1:M){ -->
-<!--       rid <- sample(1:nrow(df_it), nrow(df_it), replace = T) -->
-<!--       df_it_boot <- df_it[rid, ] -->
-<!--       boot_lm <-  summary(lm(Y2~Y1, data = df_it_boot))$coefficients -->
-<!--       boot_beta_mat[tid, i, m] <- boot_lm["Y1", "Estimate"] -->
-<!--     } -->
-
-<!--   } -->
-
-<!--   setTxtProgressBar(pb, i) -->
-
-<!-- } -->
-<!-- t2 <- Sys.time() -->
-<!-- close(pb) -->
-<!-- ``` -->
-
-<!-- The bootstrap procedure took `r round(t2-t1, 3)` minutes.  -->
-
-<!-- ```{r boot_pixel_example, fig.height=3, fig.width=15} -->
-<!-- data.frame( -->
-<!--   time = t, -->
-<!--   obs_beta = obs_beta_mat[, 1],  -->
-<!--   true_beta = 0, -->
-<!--   boot_beta_mat[,1,]) %>% -->
-<!--   pivot_longer(starts_with("X"), names_prefix = "X") %>% -->
-<!--   ggplot()+ -->
-<!--   geom_histogram(aes(x=value), bins = 30)+ -->
-<!--   geom_vline(aes(xintercept = obs_beta, col = "Observed"))+ -->
-<!--   geom_vline(aes(xintercept = true_beta, col = "Ture"))+ -->
-<!--   facet_grid(cols = vars(time))+ -->
-<!--   labs(title = "Slope estimates") -->
-<!-- ``` -->
-
-<!-- ```{r boot_pval_pixel} -->
-<!-- # test conclusion -->
-<!-- boot_reject_mat <- matrix(NA, nT, N) -->
-<!-- for(i in 1:N){ -->
-<!--   for(j in 1:nT){ -->
-<!--     cutoff <- quantile(boot_beta_mat[j, i, ], probs = c(0.025, 0.975)) -->
-<!--     boot_reject_mat[j, i] <- (0 < cutoff[1]) | (0 > cutoff[2]) -->
-<!--   } -->
-<!-- } -->
-
-<!-- data.frame(t = t, typeIerror = apply(boot_reject_mat, 1, mean)) %>% -->
-<!--   rename(Time = "t", "Type I error" = "typeIerror") %>% -->
-<!--   kable(table.attr = "style=\"color:black;\"") %>% -->
-<!--   kable_styling(full_width = F) -->
-<!-- ``` -->
-
-<!-- Bootstrap single pixel did not do anything to improve type I error. Just like permutation test, sampling single pixels across space would break the spatial correlation in the data, which explains the high type I erorr and the fact that it is no better than simple linear regression.  -->
-
-<!-- ### Block bootstrap -->
-
-<!-- Here in the bootstrap procedure, we sample equal-size, non-overlapping 4 by 4 block of pixels, hoping to preserve some spatial correlation.  -->
-
-<!-- ```{r block_boot, results='hide', cache=TRUE} -->
-<!-- M <- 1000 # number of boostraps -->
-<!-- b <- 8 # block size -->
-<!-- boot_beta_block <- array(NA, dim = c(nT, N, M)) # dims: time, subject, permutation -->
-
-<!-- # bootstrap -->
-<!-- pb <- txtProgressBar(0, N, style = 3) -->
-<!-- t1 <- Sys.time() -->
-
-<!-- for(i in 1: N){ -->
-<!--   for(tid in seq_along(t)){ -->
-<!--     this_t <- t[tid] -->
-
-<!--     # A matrix of observed outcome -->
-<!--     df_it <- df_subj %>% filter(id==i & t==this_t) -->
-<!--     Y_mat <- matrix(df_it$Y2, nS, nS, byrow = T) -->
-
-<!--     # divide block -->
-<!--     rblock <- (row(Y_mat)-1)%/%b+1 -->
-<!--     cblock <- (col(Y_mat)-1)%/%b+1 -->
-<!--     block_id_mat <- (rblock-1)*max(cblock) + cblock -->
-<!--     df_it$block_id <- as.vector(t(block_id_mat)) -->
-<!--     block_list <- split(df_it, f = df_it$block_id) -->
-
-<!--     # block boostrap -->
-<!--     for(m in 1:M){ -->
-
-<!--       # sample block -->
-<!--       nblock <- max(block_id_mat) -->
-<!--       df_it_boot<- bind_rows(block_list[sample(1:nblock, size = nblock, replace = T)]) -->
-
-<!--       # regression -->
-<!--       boot_lm <-  summary(lm(Y2~Y1, data = df_it_boot))$coefficients -->
-<!--       boot_beta_block[tid, i, m] <- boot_lm["Y1", "Estimate"] -->
-<!--     } -->
-
-<!--   } -->
-
-<!--   setTxtProgressBar(pb, i) -->
-
-<!-- } -->
-<!-- t2 <- Sys.time() -->
-<!-- close(pb) -->
-
-<!-- ``` -->
-
-<!-- ```{r boot_block_example, fig.height=3, fig.width=15} -->
-<!-- data.frame( -->
-<!--   time = t, -->
-<!--   obs_beta = obs_beta_mat[, 1],  -->
-<!--   true_beta = 0, -->
-<!--   boot_beta_block[,1,]) %>% -->
-<!--   pivot_longer(starts_with("X"), names_prefix = "X") %>% -->
-<!--   ggplot()+ -->
-<!--   geom_histogram(aes(x=value), bins = 30)+ -->
-<!--   geom_vline(aes(xintercept = obs_beta, col = "Observed"))+ -->
-<!--   geom_vline(aes(xintercept = true_beta, col = "True"))+ -->
-<!--   facet_grid(cols = vars(time))+ -->
-<!--   labs(title = "Slope estimates") -->
-<!-- ``` -->
+```{r boot_set_up, results='hide', cache=TRUE}
+M <- 1000 # number of boostraps
+max_size <- 9
+# ksize_vec <- c(1, 3, 5)
+# containers
+# bootstrap image size
+img_size <- array(NA, dim = c(length(ksize_vec), max_size, N, M))
+slope_est <- array(NA, dim = c(length(ksize_vec), max_size, N, M))
+# pval <- array(NA, dim = c(length(ksize_vec), length(bsize), N, M))
+# dim(img_size)
+```
 
 
-<!-- ```{r boot_pval_block} -->
-<!-- # test conclusion -->
-<!-- block_boot_reject_mat <- matrix(NA, nT, N) -->
-<!-- for(i in 1:N){ -->
-<!--   for(j in 1:nT){ -->
-<!--     cutoff <- quantile(boot_beta_block[j, i, ], probs = c(0.025, 0.975)) -->
-<!--     block_boot_reject_mat[j, i] <- (0 < cutoff[1]) | (0 > cutoff[2]) -->
-<!--   } -->
-<!-- } -->
+```{r block_boot, cache=TRUE, results='hide'}
+# bootstrap
+pb <- txtProgressBar(0, length(ksize_vec)*max_size*N, style = 3)
+ct <- 0
+t1 <- Sys.time()
 
-<!-- data.frame(t = t, typeIerror = apply(block_boot_reject_mat, 1, mean)) %>% -->
-<!--   rename(Time = "t", "Type I error" = "typeIerror") %>% -->
-<!--   kable(table.attr = "style=\"color:black;\"") %>% -->
-<!--   kable_styling(full_width = F) -->
-<!-- ``` -->
-
-<!-- Looks like the block bootstrap helped tiny little bit with the type I error, but far from satisfying.  -->
-
-<!-- I am starting to think it is not possible to improve type I error based on simple linear regression at specific time and subject. It is necessary to account for spatial effect in the model in some way. I can think of two courses around this: -->
-
-<!-- 1) Spatial correlation matrix of error term. This can be very, very time consuming. -->
-<!-- 2) Complex spatial random effects. -->
-
-<!-- ## Additive model -->
-
-<!-- I started with the course of complex spatial random effect, using BAM to introduce complex spatial random effect, as well as complex fixed effects with spline basis. I want to include random slope for spatial indices and their interaction. The model formula is as follows:  -->
-
-
-<!-- $$E[Y_{1i}(s_1, s_2|t)]=\beta_{it0}+\beta_{it1}Y_{2i}(s_1, s_2|t)+f_i(s_1, s_2) + b_{it0}+ b_{it1}s_1+b_{it2}s_2+b_{it3}s_1s_2$$ -->
-
-
-<!-- ```{r bam_int, results='hide'} -->
-<!-- all_fit_bam_sp <- expand_grid(id = 1:N, t=t) -->
-<!-- all_fit_bam_sp$beta_est <- all_fit_bam_sp$pval <- NA -->
-
-<!-- t1 <- Sys.time() -->
-
-<!-- pb <- txtProgressBar(0, N, 0, style=3) -->
-<!-- for(i in 1:N){ -->
-<!--   for(this_t in t){ -->
-<!--     this_df <- df_subj %>% filter(id==i & t==this_t) %>% -->
-<!--       mutate(s_int = s1*s2) # create interaction between spatial indices -->
-<!--     bam_it <- bam(Y2 ~ Y1+s(s1, k=20)+s(s2, k=20)+ti(s1,s2, k=10)+ -->
-<!--                     s(id, by=s1, bs="re")+s(id, by=s2, bs="re")+ -->
-<!--                     s(id, by=s_int, bs="re"), -->
-<!--                   data = this_df, family = gaussian,  -->
-<!--                   method = "fREML", discrete = TRUE) -->
-<!--     sum_it <- summary(bam_it) -->
-<!--     all_fit_bam_sp[all_fit_bam_sp$id==i & all_fit_bam_sp$t==this_t, "beta_est"] <- sum_it$p.coeff["Y1"] -->
-<!--     all_fit_bam_sp[all_fit_bam_sp$id==i & all_fit_bam_sp$t==this_t, "pval"] <- sum_it$p.pv["Y1"] -->
-<!--   } -->
-
-<!--   setTxtProgressBar(pb, i) -->
-<!-- } -->
-<!-- t2 <- Sys.time() -->
-
-<!-- close(pb) -->
-<!-- ``` -->
+for(k in seq_along(ksize_vec)){ # filter size for data generation
+  
+  for(b in 1:max_size){ # block size for bootstrap
+    
+    for(i in 1:N){ # for each subject
+      
+      # A matrix of observed outcome
+      this_df <- df_subj_k %>% filter(ksize==ksize_vec[k] & id == i)
+      Y_mat <- matrix(this_df$Y2, nS, nS)
+      
+      # divide the matrix into blocks
+      rblock <- (row(Y_mat)-1)%/%b+1
+      cblock <- (col(Y_mat)-1)%/%b+1
+      block_id_mat <- (rblock-1)*max(cblock) + cblock
+      nblock <- max(block_id_mat)
+      
+      # sample blocks
+      # sample the same number of blocks as the original image
+      this_df$block_id <- as.vector(block_id_mat)
+      block_list <- split(this_df, f = this_df$block_id)
+      
+      for(m in 1:M){
+        boot_block <- sample(1:nblock, size = nblock, replace = T)
+        boot_df <- bind_rows(block_list[boot_block])
+        img_size[k, b, i, m] <- nrow(boot_df)
+        
+        # fit model
+        boot_lm <-  summary(lm(Y2~Y1, data = boot_df))$coefficients
+        slope_est[k, b, i, m] <- boot_lm["Y1", "Estimate"]
+        
+      }
+      
+      ct <- ct+1
+      setTxtProgressBar(pb, ct)
+      
+    }
+  }
+}
+t2 <- Sys.time()
+```
 
 
-<!-- ```{r, fig.height=3, fig.width=15, eval=FALSE} -->
-<!-- all_fit_bam_sp %>% -->
-<!--   mutate(cutoff = 0.05) %>% -->
-<!--   ggplot()+ -->
-<!--   geom_histogram(aes(x=pval), bins = 30)+ -->
-<!--   geom_vline(aes(xintercept = cutoff, col = "p=0.05"))+ -->
-<!--   facet_grid(cols = vars(t))+ -->
-<!--   labs(title = "P values") -->
-<!-- ``` -->
+- Time spent on the bootstrap process: `r t2-t1`
+- Expected image size: `r mean(img_size)`
 
 
-<!-- ```{r} -->
-<!-- all_fit_bam_sp %>% -->
-<!--   mutate(reject=pval< 0.05) %>% -->
-<!--   group_by(t) %>%  -->
-<!--   summarize(typeIerror=mean(reject))%>% -->
-<!--   rename(Time = "t", "Type I error" = "typeIerror") %>% -->
-<!--   kable(table.attr = "style=\"color:black;\"") %>% -->
-<!--   kable_styling(full_width = F) -->
-<!-- ``` -->
+```{r}
+# check expectation of image size
+# apply(img_size[ , , , ], MARGIN = 1:3, FUN = mean)
+# mean(img_size)
 
+# calculate Type I error
+lqt_mat <- apply(slope_est[ , , , ], MARGIN = 1:3, FUN =quantile, probs = 0.025)
+uqt_mat <- apply(slope_est[ , , , ], MARGIN = 1:3, FUN =quantile, probs = 0.975)
+reject_mat <- 0 < lqt_mat | uqt_mat < 0
+typeIerror <- apply(reject_mat, 1:2, mean)
+typeIerror <- data.frame(ksize = ksize_vec, typeIerror)
+```
 
-<!-- This is the best type I error we've got so far, but still much greater than the nominal value of 5%.  -->
-
-<!-- I have also made attempts with GLS, GLMM and LME to include spatial correlation. However, all these models takes hours even days to fit. In fact, GLS couldn't accommodate a spatial correlation of this size.  -->
-
-
-<!-- I wanna try if the other doc knit with this?  -->
+```{r}
+typeIerror %>% pivot_longer(starts_with("X")) %>%
+  mutate(bsize = as.numeric(gsub("X", "", name))) %>%
+  ggplot()+
+  geom_line(aes(x=bsize, y=value, group=as.factor(ksize), col=as.factor(ksize)))+
+  geom_point(aes(x=bsize, y=value, group=as.factor(ksize), col=as.factor(ksize)))+
+  geom_hline(yintercept = 0.05, col = "black", linetype = "dashed")+
+  labs(x="Block size", y="Type I error", col = "Filter size")+
+  scale_x_continuous(breaks = 1:max_size)
+```
