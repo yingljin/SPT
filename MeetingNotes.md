@@ -25,3 +25,10 @@ Next steps:
 - keep the expectation of the image size fixed. generation propobablity propotional to block size
 3. Send cipiran the progress report
 4. Send Andrew the robust spatial inference paper
+
+# 24/3/21
+1. For LM, increase sample size (maybe 1000) and figure out why type I error is lower than nominal value
+2. Add the block bootstrap across alpha. 
+- Use a weight function with a high decay rate (exp(-alpha*d^2) ? )
+- Report distribution of estimated beta
+3. Simulate under alternative hypothesis (beta=1 ? ), report coverage probablity
