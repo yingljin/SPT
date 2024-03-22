@@ -108,9 +108,9 @@ Some observations:
 
 Here, I would like to use weighted average within a filter. Let's fix the kernel size to be 5, and explore effect of difference weight matrix. 
 
-Let's construct the weight matrix using inverse of the exponential of Euclidean distance to center:
+I would like to construct a weight matrix that decay fast from center to border. Let's try using inverse of the exponential of the square of Euclidean distance to center:
 
-$$w_{ij} = \frac{exp(-\alpha d_{ij})}{\sum_{i,j=1}^5 exp(-\alpha d_{ij})}$$
+$$w_{ij} = \frac{exp(-\alpha d_{ij}^2)}{\sum_{i,j=1}^5 exp(-\alpha d_{ij}^2)}$$
 
 - $\alpha$ is a positive integer controling for the rate of change of weight wrt distance.
 - $d_{ij}$ is the Euclidean distance between point (i, j) and center of filter. 
@@ -124,13 +124,14 @@ wt_dist <- array(NA, dim = c(5, 5, length(alpha_vec)))
 for(m in seq_along(alpha_vec)){
   for(i in 1:5){
     for(j in 1:5){
-    wt_dist[i,j, m] <- exp(-alpha_vec[m]*sqrt((i-3)^2+(j-3)^2))
+    wt_dist[i,j, m] <- exp(-alpha_vec[m]*((i-3)^2+(j-3)^2))
     }
   }
   
   # normalization
   wt_dist[,,m] <- wt_dist[,,m]/sum(wt_dist[,,m]) 
 }
+
 ```
 
 
@@ -148,6 +149,8 @@ df_wt %>%
   facet_wrap(~name, nrow = 1)+
   labs(title = "Weight matrix")
 ```
+
+Here, when $\alpha=5$, the boarder weight can get very, very close to zero (corner pixel: 4.14e-18). The center pixel takes 97.36% of the weight. 
 
 
 ```{r gen_data_wt}
@@ -201,27 +204,28 @@ Y_{2i}(s_1, s_2, t) &=\epsilon_{2i}(s_1, s_2, t) \\
 - In fact, in this case there is no point generating across time, because all time points have the same distribution. It would just be like repeating the same thing a few more times. That leaves us room for filter size and weight. 
 
 
-```{r set-up}
+```{r set-up1}
 # set up space-time grid
 # generate a 2D image of 32 by 32
 nS <- 32
+Nf <- 1000 # generate 1000 subjects over all, but use only 100 for the block bootstrap
 N <- 100
-df_subj_k <- expand_grid(ksize = ksize_vec, id=1:N, s2=1:nS, s1 = 1:nS)
+df_subj <- expand_grid(ksize = ksize_vec, id=1:Nf, s2=1:nS, s1 = 1:nS)
 ```
 
 
-```{r gen_data1, results='hide'}
-df_subj_k$Y1 <- df_subj_k$Y2 <- NA
+```{r gen_data1, results='hide', cache=TRUE}
+df_subj$Y1 <- df_subj$Y2 <- NA
 
 # generate individual scores
 # true_xi <- matrix(rnorm(2*N, 0, 1.5), nrow = N, ncol = 2)
 # true_zeta <- matrix(rnorm(2*N, 0, 1.5), nrow = N, ncol = 2)
 
 # generate outcomes
-pb <- txtProgressBar(min=0, max=N, style = 3)
+pb <- txtProgressBar(min=0, max=Nf, style = 3)
 
 t1 <- Sys.time()
-for(i in 1:N){ # fix a subject
+for(i in 1:Nf){ # fix a subject
   
   for(k in seq_along(ksize_vec)){ # fix a time point
 
@@ -232,13 +236,13 @@ for(i in 1:N){ # fix a subject
     ## a moving average error
     Y1 <- MA_rand_field(ksize_vec[k], nS)
     # y1_it <- true_xi[i,1]*dist_it+true_xi[i,2]*this_t + as.vector(ma_err1)
-    df_subj_k$Y1[df_subj_k$ksize==ksize_vec[k] & df_subj_k$id==i] <- as.vector(Y1)
+    df_subj$Y1[df_subj$ksize==ksize_vec[k] & df_subj$id==i] <- as.vector(Y1)
     
     # generate Y2
     ## a moving average error
     Y2 <- MA_rand_field(ksize_vec[k], nS)
     # y2_it <- true_zeta[i,1]*dist_it+true_zeta[i,2]*this_t + as.vector(ma_err2)
-    df_subj_k$Y2[df_subj_k$ksize==ksize_vec[k] & df_subj_k$id==i] <- as.vector(Y2)
+    df_subj$Y2[df_subj$ksize==ksize_vec[k] & df_subj$id==i] <- as.vector(Y2)
    }
 
 setTxtProgressBar(pb, i)
@@ -246,14 +250,17 @@ setTxtProgressBar(pb, i)
 t2 <- Sys.time()
 
 close(pb)
+
+# save data
+# save(df_subj, file = here("Data/sim_data_ksize.RData"))
 ```
 
 
 It took `r round(t2-t1, 3)` minutes to generate data for `r N` subjects. Below we show an example of one subject. 
 
 
-```{r, example_data, fig.height=6, fig.width=15}
-df_subj_k %>% 
+```{r example_data1, fig.height=6, fig.width=15}
+df_subj %>% 
   filter(id==15) %>%
   pivot_longer(starts_with("Y")) %>%
   ggplot()+
@@ -269,8 +276,8 @@ We fit a simple linear model across space conditioning on each subject and time:
 $$Y_{2i}(\mathbf{s}|t) = \beta_{it0}+\beta_{it1}Y_{1i}(\mathbf{s}|t)+\epsilon_i(\mathbf{s}|t)$$
 
 ```{r, fig.height=12, fig.width=15}
-df_subj_k %>% 
-  filter(id %in% sample(1:N, size = 4)) %>%
+df_subj %>% 
+  filter(id %in% sample(1:Nf, size = 4)) %>%
   ggplot(aes(x=Y1, y=Y2))+
   geom_point(size = 0.2)+
   geom_smooth(formula = 'y~x', method = "lm")+
@@ -282,21 +289,38 @@ df_subj_k %>%
 
 
 ```{r}
-df_subj_k %>%
-  group_by(id, ksize) %>%
-  group_modify(~{
-    fit_lm <- lm(Y2~Y1, data = .x)
-    data.frame(beta = coef(fit_lm)["Y1"], 
-               pval = summary(fit_lm)$coefficients["Y1", "Pr(>|t|)"])
-  }) %>%
-  mutate(reject = pval < 0.05) %>%
-  group_by(ksize) %>%
-  summarise_at("reject", mean) %>%
-  rename("Filter size" = "ksize", "Type I error" = reject) %>%
+lm_err <- data.frame(ksize = ksize_vec)
+N_vec <- c(100, 200, 500, 1000)
+
+for(n in seq_along(N_vec)){
+  
+  err_n <- df_subj %>%
+    filter(id <= N_vec[n]) %>%
+    group_by(id, ksize) %>%
+    group_modify(~{
+      fit_lm <- lm(Y2~Y1, data = .x)
+      data.frame(beta = coef(fit_lm)["Y1"], 
+                 pval = summary(fit_lm)$coefficients["Y1", "Pr(>|t|)"])
+    }) %>%
+    mutate(reject = pval < 0.05) %>%
+    group_by(ksize) %>%
+    summarise_at("reject", mean) 
+  
+  lm_err[, paste0("N", N_vec[n])] <- err_n$reject
+  
+}
+
+lm_err %>%
+  rename("Filter size" = "ksize") %>%
   kable(table.attr = "style=\"color:black;\"") %>%
-  kable_styling(full_width = F)
+  kable_styling(full_width = F) %>%
+  add_header_above(c(" " = 1, "Type I error" = "4"))
+
 ```
 
+After increasing the sample size to 1000, the k=1 case had 4.4% type I error, still slightly lower than the nominal value of 5%. Does it indicate that data generated under this scheme is more likely to have false rejection under simple linear regression? Would it be because of the spatial correlation, such as the spatial correlation introduced some kind of correlation between $Y_1$ and $Y_2$? 
+
+In fact, when I repeat this, I got a decreasing type I error from 0.12 to 0.067. I think this probably just a random chance? 
 
 ## Block boostrap
 
@@ -312,12 +336,14 @@ Let's say the original image has N pixels and B blocks, and we want to resample 
 $$E(N_{new}) = E(\sum_{b=1}^Bn_b^{new}) = \sum_{b=1}^BE(n_b^{new})=\sum_{b=1}^B\sum_{b=1}^Bn_bp_b = \sum_{b=1}^B\sum_{b=1}^B n_b\frac{n_b}{N}=B\frac{\sum_{b=1}^Bn_B^2}{N} $$
 If we set $p_b = 1/B$, then 
 
-$$E(N_{new}) = E(\sum_{b=1}^Bn_b^{new}) = \sum_{b=1}^BE(n_b^{new})=\sum_{b=1}^B\sum_{b=1}^Bn_bp_b = \sum_{b=1}^B\sum_{b=1}^B n_b\frac{1}{B})=\sum_{b=1}^B\frac{N}{B} = N $$
+$$E(N_{new}) = E(\sum_{b=1}^Bn_b^{new}) = \sum_{b=1}^BE(n_b^{new})=\sum_{b=1}^B\sum_{b=1}^Bn_bp_b = \sum_{b=1}^B\sum_{b=1}^B n_b\frac{1}{B}=\sum_{b=1}^B\frac{N}{B} = N $$
 
 
-```{r boot_set_up, results='hide', cache=TRUE}
+```{r boot_set_up1, results='hide'}
 M <- 1000 # number of boostraps
 max_size <- 9
+# N
+df_subj_k <- df_subj %>% filter(id %in% 1:N)
 # ksize_vec <- c(1, 3, 5)
 # containers
 # bootstrap image size
@@ -328,7 +354,7 @@ slope_est <- array(NA, dim = c(length(ksize_vec), max_size, N, M))
 ```
 
 
-```{r block_boot, cache=TRUE, results='hide'}
+```{r block_boot1, cache=TRUE, results='hide'}
 # bootstrap
 pb <- txtProgressBar(0, length(ksize_vec)*max_size*N, style = 3)
 ct <- 0
@@ -380,7 +406,7 @@ t2 <- Sys.time()
 - Expected image size: `r mean(img_size)`
 
 
-```{r}
+```{r type1err1}
 # check expectation of image size
 # apply(img_size[ , , , ], MARGIN = 1:3, FUN = mean)
 # mean(img_size)
@@ -403,3 +429,324 @@ typeIerror %>% pivot_longer(starts_with("X")) %>%
   labs(x="Block size", y="Type I error", col = "Filter size")+
   scale_x_continuous(breaks = 1:max_size)
 ```
+
+Below I show the mean and standard deviation of bootstrap slope estimates for all 100 subjects (each point represents a subject).
+
+```{r slope_dist1, fig.height=10, fig.width=10}
+# mean slope estimates
+slope_mean1 <- apply(slope_est, MARGIN = 1:3, FUN = mean)
+array(aperm(slope_mean1, perm = c(1, 3, 2)), 
+      dim =c(N*length(ksize_vec), max_size)) %>% 
+  data.frame() %>%
+  mutate(id = rep(1:N, each = length(ksize_vec)), 
+         ksize = rep(ksize_vec, N),
+         .before=1) %>%
+  pivot_longer(starts_with("X")) %>%
+  mutate(bsize = as.numeric(gsub("X", "", name))) %>%
+  ggplot()+
+  geom_boxplot(aes(x=bsize, y=value, group = bsize))+
+  geom_jitter(aes(x=bsize, y=value), size = 0.2)+
+  facet_wrap(~ksize, ncol = 1)+
+  labs(x="Block size", title="Bootstrap mean of slope estimates")+
+  scale_x_continuous(breaks = 1:max_size)+
+  geom_hline(yintercept = 0, col="red", linetype = "dashed")
+
+```
+
+```{r, fig.height=10, fig.width=10}
+# mean slope estimates
+slope_sd1 <- apply(slope_est, MARGIN = 1:3, FUN = sd)
+array(aperm(slope_sd1, perm = c(1, 3, 2)), 
+      dim =c(N*length(ksize_vec), max_size)) %>% 
+  data.frame() %>%
+  mutate(id = rep(1:N, each = length(ksize_vec)), 
+         ksize = rep(ksize_vec, N),
+         .before=1) %>%
+  pivot_longer(starts_with("X")) %>%
+  mutate(bsize = as.numeric(gsub("X", "", name))) %>%
+  ggplot()+
+  geom_boxplot(aes(x=bsize, y=value, group = bsize))+
+  geom_jitter(aes(x=bsize, y=value), size = 0.2)+
+  facet_wrap(~ksize, ncol = 1)+
+  labs(x="Block size", title="Standard deviation of bootstrap estimates")+
+  scale_x_continuous(breaks = 1:max_size)
+
+```
+
+Below I also showed an example of the bootstrap slope estimates of one subject.
+
+```{r, fig.height=10, fig.width=10}
+array(slope_est[,,15,], dim = c(length(ksize_vec)*max_size, M)) %>% 
+  data.frame() %>%
+  mutate(ksize = rep(ksize_vec, max_size), 
+         bsize = rep(1:max_size, each = length(ksize_vec)),
+         .before = 1) %>% 
+  pivot_longer(starts_with("X")) %>%
+  ggplot()+
+  geom_boxplot(aes(x=bsize, y=value, group=bsize))+
+  geom_jitter(aes(x=bsize, y=value, group=bsize), size=0.2)+
+  facet_wrap(~ksize, ncol=1)+
+  labs(x="Block size", title = "Bootstrap slope estiamtes of subject 15")+
+  geom_hline(yintercept = 0, col="red", linetype = "dashed")
+```
+
+# Effect of weight matrix on bivariate correlation testing
+
+Here the two parameters of interest are the weight matrix (in data generation process) and the block size (in bootstrap process). I will use the same weight matrix as Section 1.2, and the same block size as Section 2.1. 
+
+Just like before, I will generate data for 1000 subject, but only use 100 for the block bootstrap portion. The filter size for generating data is fixed at 5. 
+
+```{r set-up2}
+# set up space-time grid
+# generate a 2D image of 32 by 32
+# nS <- 32
+# Nf
+df_subj2 <- expand_grid(alpha = alpha_vec, id=1:Nf, s2=1:nS, s1 = 1:nS)
+# alpha_vec
+# wt_dist
+```
+
+
+```{r gen_data2, results='hide', cache=TRUE}
+df_subj2$Y1 <- df_subj2$Y2 <- NA
+
+
+# generate outcomes
+pb <- txtProgressBar(min=0, max=Nf, style = 3)
+
+t1 <- Sys.time()
+for(i in 1:Nf){ # fix a subject
+  
+  for(k in seq_along(alpha_vec)){ # fix a weight matrix
+
+    # generate Y1
+    ## a moving average error
+    Y1 <- MWA_rand_field(kf = 5, ki = 32, wt = wt_dist[,,k])
+    df_subj2$Y1[df_subj2$alpha==alpha_vec[k] & df_subj2$id==i] <- as.vector(Y1)
+    
+    # generate Y2
+    ## a moving average error
+    Y2 <- MWA_rand_field(kf = 5, ki = 32, wt = wt_dist[,,k])
+    # y2_it <- true_zeta[i,1]*dist_it+true_zeta[i,2]*this_t + as.vector(ma_err2)
+    df_subj2$Y2[df_subj2$alpha==alpha_vec[k] & df_subj$id==i] <- as.vector(Y2)
+   }
+
+setTxtProgressBar(pb, i)
+}
+t2 <- Sys.time()
+
+close(pb)
+
+# save data
+# save(df_subj2, file = here("Data/sim_data_wt.RData"))
+```
+
+
+```{r example_data2, fig.height=6, fig.width=15}
+df_subj2 %>% 
+  filter(id==15) %>%
+  pivot_longer(starts_with("Y")) %>%
+  ggplot()+
+  geom_tile(aes(x=s1, y=s2, fill = value))+
+  facet_grid(cols=vars(alpha), rows = vars(name))+
+  labs(title = "Generated data of subject ID = 15")
+```
+
+
+## Simple linear regression
+
+```{r, fig.height=12, fig.width=15}
+df_subj2 %>% 
+  filter(id %in% sample(1:N, size = 4)) %>%
+  ggplot(aes(x=Y1, y=Y2))+
+  geom_point(size = 0.2)+
+  geom_smooth(formula = 'y~x', method = "lm")+
+  stat_cor(method = "pearson")+
+  facet_grid(rows = vars(id), cols = vars(alpha))+
+  labs(title = "Perason correlation of four subject")
+```
+
+
+```{r lm2}
+lm_err2 <- data.frame(alpha = alpha_vec)
+# N_vec <- c(100, 200, 500, 1000)
+
+for(n in seq_along(N_vec)){
+  
+  err_n <- df_subj2 %>%
+    filter(id <= N_vec[n]) %>%
+    group_by(id, alpha) %>%
+    group_modify(~{
+      fit_lm <- lm(Y2~Y1, data = .x)
+      data.frame(beta = coef(fit_lm)["Y1"], 
+                 pval = summary(fit_lm)$coefficients["Y1", "Pr(>|t|)"])
+    }) %>%
+    mutate(reject = pval < 0.05) %>%
+    group_by(alpha) %>%
+    summarise_at("reject", mean) 
+  
+  lm_err2[, paste0("N", N_vec[n])] <- err_n$reject
+  
+}
+
+lm_err2 %>%
+  # rename("Alpha" = "ksize") %>%
+  kable(table.attr = "style=\"color:black;\"") %>%
+  kable_styling(full_width = F) %>%
+  add_header_above(c(" " = 1, "Type I error" = "4"))
+
+```
+
+
+
+## Block bootstrap
+
+We will follow the same set up as Section 2.2. 
+
+```{r boot_set_up2, results='hide'}
+# M <- 1000 # number of boostraps
+# N <- 100 # sample size
+df_subj_wt <- df_subj2 %>% filter(id %in% 1:N)
+# max_size
+# containers
+# bootstrap image size
+img_size2 <- array(NA, dim = c(length(alpha_vec), max_size, N, M))
+slope_est2 <- array(NA, dim = c(length(alpha_vec), max_size, N, M))
+```
+
+
+```{r block_boot2, cache=TRUE, results='hide'}
+# bootstrap
+pb <- txtProgressBar(0, length(alpha_vec)*max_size*N, style = 3)
+ct <- 0
+t1 <- Sys.time()
+
+for(k in seq_along(alpha_vec)){ # filter size for data generation
+  
+  for(b in 1:max_size){ # block size for bootstrap
+    
+    for(i in 1:N){ # for each subject
+      
+      # A matrix of observed outcome
+      this_df <- df_subj_wt %>% filter(alpha==alpha_vec[k] & id == i)
+      Y_mat <- matrix(this_df$Y2, nS, nS)
+      
+      # divide the matrix into blocks
+      rblock <- (row(Y_mat)-1)%/%b+1
+      cblock <- (col(Y_mat)-1)%/%b+1
+      block_id_mat <- (rblock-1)*max(cblock) + cblock
+      nblock <- max(block_id_mat)
+      
+      # sample blocks
+      # sample the same number of blocks as the original image
+      this_df$block_id <- as.vector(block_id_mat)
+      block_list <- split(this_df, f = this_df$block_id)
+      
+      for(m in 1:M){
+        boot_block <- sample(1:nblock, size = nblock, replace = T)
+        boot_df <- bind_rows(block_list[boot_block])
+        img_size2[k, b, i, m] <- nrow(boot_df)
+        
+        # fit model
+        boot_lm <-  summary(lm(Y2~Y1, data = boot_df))$coefficients
+        slope_est2[k, b, i, m] <- boot_lm["Y1", "Estimate"]
+        
+      }
+      
+      ct <- ct+1
+      setTxtProgressBar(pb, ct)
+      
+    }
+  }
+}
+t2 <- Sys.time()
+```
+
+
+- Time spent on the bootstrap process: `r t2-t1`
+- Expected image size: `r mean(img_size2)`
+
+
+```{r}
+# check expectation of image size
+# apply(img_size[ , , , ], MARGIN = 1:3, FUN = mean)
+# mean(img_size)
+
+# calculate Type I error
+lqt_mat2 <- apply(slope_est2[ , , , ], MARGIN = 1:3, FUN =quantile, probs = 0.025)
+uqt_mat2 <- apply(slope_est2[ , , , ], MARGIN = 1:3, FUN =quantile, probs = 0.975)
+reject_mat2 <- 0 < lqt_mat2 | uqt_mat2 < 0
+typeIerror2 <- apply(reject_mat2, 1:2, mean)
+typeIerror2 <- data.frame(alpha = alpha_vec, typeIerror2)
+```
+
+```{r}
+typeIerror2 %>% pivot_longer(starts_with("X")) %>%
+  mutate(bsize = as.numeric(gsub("X", "", name))) %>%
+  ggplot()+
+  geom_line(aes(x=bsize, y=value, group=as.factor(alpha), col=as.factor(alpha)))+
+  geom_point(aes(x=bsize, y=value, group=as.factor(alpha), col=as.factor(alpha)))+
+  geom_hline(yintercept = 0.05, col = "black", linetype = "dashed")+
+  labs(x="Block size", y="Type I error", col = "Weight matrix")+
+  scale_x_continuous(breaks = 1:max_size)
+```
+
+
+```{r slope_dist2, fig.height=10, fig.width=10}
+# mean slope estimates
+slope_mean2 <- apply(slope_est2, MARGIN = 1:3, FUN = mean)
+array(aperm(slope_mean2, perm = c(1, 3, 2)), 
+      dim =c(N*length(alpha_vec), max_size)) %>% 
+  data.frame() %>%
+  mutate(id = rep(1:N, each = length(alpha_vec)), 
+         alpha = rep(alpha_vec, N),
+         .before=1) %>%
+  pivot_longer(starts_with("X")) %>%
+  mutate(bsize = as.numeric(gsub("X", "", name))) %>%
+  ggplot()+
+  geom_boxplot(aes(x=bsize, y=value, group = bsize))+
+  geom_jitter(aes(x=bsize, y=value), size = 0.2)+
+  facet_wrap(~alpha, ncol = 1)+
+  labs(x="Block size", title="Bootstrap mean of slope estimates")+
+  scale_x_continuous(breaks = 1:max_size)+
+  geom_hline(yintercept = 0, col="red", linetype = "dashed")
+
+```
+
+```{r, fig.height=10, fig.width=10}
+# mean slope estimates
+slope_sd2 <- apply(slope_est2, MARGIN = 1:3, FUN = sd)
+array(aperm(slope_sd2, perm = c(1, 3, 2)), 
+      dim =c(N*length(alpha_vec), max_size)) %>% 
+  data.frame() %>%
+  mutate(id = rep(1:N, each = length(alpha_vec)), 
+         alpha = rep(alpha_vec, N),
+         .before=1) %>%
+  pivot_longer(starts_with("X")) %>%
+  mutate(bsize = as.numeric(gsub("X", "", name))) %>%
+  ggplot()+
+  geom_boxplot(aes(x=bsize, y=value, group = bsize))+
+  geom_jitter(aes(x=bsize, y=value), size = 0.2)+
+  facet_wrap(~alpha, ncol = 1)+
+  labs(x="Block size", title="Standard deviation of bootstrap estimates")+
+  scale_x_continuous(breaks = 1:max_size)
+
+```
+
+
+```{r, fig.height=10, fig.width=10}
+array(slope_est2[,,15,], dim = c(length(alpha_vec)*max_size, M)) %>% 
+  data.frame() %>%
+  mutate(alpha = rep(alpha_vec, max_size), 
+         bsize = rep(1:max_size, each = length(alpha_vec)),
+         .before = 1) %>% 
+  pivot_longer(starts_with("X")) %>%
+  ggplot()+
+  geom_boxplot(aes(x=bsize, y=value, group=bsize))+
+  geom_jitter(aes(x=bsize, y=value, group=bsize), size=0.2)+
+  facet_wrap(~alpha, ncol=1)+
+  labs(x="Block size", title = "Bootstrap slope estiamtes of subject 15")+
+  geom_hline(yintercept = 0, col="red", linetype = "dashed")
+```
+
+
