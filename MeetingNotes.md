@@ -31,4 +31,8 @@ Next steps:
 2. Add the block bootstrap across alpha. 
 - Use a weight function with a high decay rate (exp(-alpha*d^2) ? )
 - Report distribution of estimated beta
-3. Simulate under alternative hypothesis (beta=1 ? ), report coverage probablity
+3. Simulate under alternative hypothesis (beta=1 ? ), report coverage probability
+
+# 23/3/26
+1. In the block bootstrap, investigate the correlation between residuals, after substracting the fixed effects.
+- Maybe semivariograms for residuals?  
