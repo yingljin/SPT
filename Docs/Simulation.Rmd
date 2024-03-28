@@ -15,7 +15,7 @@ output:
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 
-set.seed(305)
+set.seed(328)
 
 library(mgcv)
 library(tidyverse)
@@ -34,6 +34,7 @@ library(sp)
 ## data generation
 ksize_vec <- seq(1, 9, by = 2) # filter size
 alpha_vec <- c(0, 0.5, 1, 2.5, 5) # weight matrix
+
 nS <- 32 # space grid
 Nf <- 1000 # generate 1000 subjects over all, but use only 100 for the block bootstrap
 N <- 100 # 100 subjects for block bootstrap
@@ -157,13 +158,14 @@ for(m in seq_along(alpha_vec)){
 
 df_wt %>%
   pivot_longer(starts_with("alpha")) %>% 
+  mutate(name=fct_rev(name)) %>%
   ggplot()+
   geom_tile(aes(x=s1, y=s2, fill=value))+
   facet_wrap(~name, nrow = 1)+
   labs(title = "Weight matrix")
 ```
 
-Here, when $\alpha=5$, the boarder weight can get very, very close to zero (corner pixel: 4.14e-18). The center pixel takes 97.36% of the weight. 
+Here, when $\alpha=5$, the boarder weight can get very, very close to zero (corner pixel: 4.14e-18). The center pixel takes 97.36% of the weight. When $\alpha=0$, the weight matrix gets us a simple average. As $\alpha$ increase, the filter put more weight on the center pixel and less weight on the boarder pixels, leading to lower spatial dependence. 
 
 
 ```{r gen_data_wt}
@@ -180,6 +182,7 @@ for(m in seq_along(alpha_vec)){
 
 ```{r heatmat_wt, fig.height=3, fig.width=15}
 ma_wt %>% pivot_longer(starts_with("alpha")) %>%
+  mutate(name=fct_rev(name)) %>%
   ggplot()+
   geom_tile(aes(x=s1, y=s2, fill=value))+
   facet_wrap(~name, nrow = 1)
@@ -193,8 +196,9 @@ bind_rows(
   variogram(alpha2.5~1, locations = ~s1+s2, data = ma_wt) %>% mutate(alpha = 2.5),
   variogram(alpha5~1, locations = ~s1+s2, data = ma_wt) %>% mutate(alpha = 5)
 ) %>%
+  mutate(alpha=fct_rev(as.factor(alpha))) %>%
   ggplot()+
-  geom_line(aes(x=dist, y=gamma, col=as.factor(alpha)))+
+  geom_line(aes(x=dist, y=gamma, col=alpha))+
   labs(y="Sample variagram", col = "Alpha")
 ```
 
@@ -331,7 +335,6 @@ lm_err %>%
 
 After increasing the sample size to 1000, the k=1 case had 4.4% type I error, still slightly lower than the nominal value of 5%. Does it indicate that data generated under this scheme is more likely to have false rejection under simple linear regression? Would it be because of the spatial correlation, such as the spatial correlation introduced some kind of correlation between $Y_1$ and $Y_2$? 
 
-In fact, when I repeat this, I got a decreasing type I error from 0.12 to 0.067. I think this probably just a random chance? 
 
 ### Block boostrap
 
@@ -553,6 +556,7 @@ close(pb)
 ```{r example_data2, fig.height=6, fig.width=15}
 df_subj2 %>% 
   filter(id==15) %>%
+  mutate(alpha=fct_rev(as.factor(alpha))) %>%
   pivot_longer(starts_with("Y")) %>%
   ggplot()+
   geom_tile(aes(x=s1, y=s2, fill = value))+
@@ -566,6 +570,7 @@ df_subj2 %>%
 ```{r, fig.height=12, fig.width=15}
 df_subj2 %>% 
   filter(id %in% sample(1:N, size = 4)) %>%
+  mutate(alpha=fct_rev(as.factor(alpha))) %>%
   ggplot(aes(x=Y1, y=Y2))+
   geom_point(size = 0.2)+
   geom_smooth(formula = 'y~x', method = "lm")+
@@ -599,6 +604,8 @@ for(n in seq_along(N_vec)){
 
 lm_err2 %>%
   # rename("Alpha" = "ksize") %>%
+  arrange(desc(alpha)) %>%
+  mutate(alpha=fct_rev(as.factor(alpha))) %>%
   kable(table.attr = "style=\"color:black;\"") %>%
   kable_styling(full_width = F) %>%
   add_header_above(c(" " = 1, "Type I error" = "4"))
@@ -691,6 +698,7 @@ typeIerror2 <- data.frame(alpha = alpha_vec, typeIerror2)
 ```{r}
 typeIerror2 %>% pivot_longer(starts_with("X")) %>%
   mutate(bsize = as.numeric(gsub("X", "", name))) %>%
+  mutate(alpha=fct_rev(as.factor(alpha))) %>%
   ggplot()+
   geom_line(aes(x=bsize, y=value, group=as.factor(alpha), col=as.factor(alpha)))+
   geom_point(aes(x=bsize, y=value, group=as.factor(alpha), col=as.factor(alpha)))+
@@ -711,6 +719,7 @@ array(aperm(slope_mean2, perm = c(1, 3, 2)),
          .before=1) %>%
   pivot_longer(starts_with("X")) %>%
   mutate(bsize = as.numeric(gsub("X", "", name))) %>%
+  mutate(alpha=fct_rev(as.factor(alpha))) %>%
   ggplot()+
   geom_boxplot(aes(x=bsize, y=value, group = bsize))+
   geom_jitter(aes(x=bsize, y=value), size = 0.2)+
@@ -732,6 +741,7 @@ array(aperm(slope_sd2, perm = c(1, 3, 2)),
          .before=1) %>%
   pivot_longer(starts_with("X")) %>%
   mutate(bsize = as.numeric(gsub("X", "", name))) %>%
+  mutate(alpha=fct_rev(as.factor(alpha))) %>%
   ggplot()+
   geom_boxplot(aes(x=bsize, y=value, group = bsize))+
   geom_jitter(aes(x=bsize, y=value), size = 0.2)+
@@ -749,6 +759,7 @@ array(slope_est2[,,15,], dim = c(length(alpha_vec)*max_size, M)) %>%
          bsize = rep(1:max_size, each = length(alpha_vec)),
          .before = 1) %>% 
   pivot_longer(starts_with("X")) %>%
+  mutate(alpha=fct_rev(as.factor(alpha))) %>%
   ggplot()+
   geom_boxplot(aes(x=bsize, y=value, group=bsize))+
   geom_jitter(aes(x=bsize, y=value, group=bsize), size=0.2)+
@@ -1005,7 +1016,7 @@ array(slope_est3[,,15,], dim = c(length(ksize_vec)*max_size, M)) %>%
   geom_hline(yintercept = 1, col="red", linetype = "dashed")
 ```
 
-# Weight matrix
+## Weight matrix
 
 ```{r set-up4}
 # set up space-time grid
@@ -1057,6 +1068,7 @@ close(pb)
 ```{r example_data4, fig.height=6, fig.width=15}
 df_h1_wt %>% 
   filter(id==15) %>%
+  mutate(alpha=fct_rev(as.factor(alpha))) %>%
   pivot_longer(starts_with("Y")) %>%
   ggplot()+
   geom_tile(aes(x=s1, y=s2, fill = value))+
@@ -1068,6 +1080,7 @@ df_h1_wt %>%
 df_h1_wt %>% 
   # filter(id==1) %>%
   filter(id %in% sample(1:N, size = 4)) %>%
+  mutate(alpha=fct_rev(as.factor(alpha))) %>%
   ggplot(aes(x=Y1, y=Y2))+
   geom_point(size = 0.2)+
   geom_smooth(formula = 'y~x', method = "lm")+
@@ -1103,6 +1116,7 @@ for(n in seq_along(N_vec)){
 
 lm_err4 %>%
   # rename("Alpha" = "ksize") %>%
+  arrange(desc(alpha)) %>%
   kable(table.attr = "style=\"color:black;\"") %>%
   kable_styling(full_width = F) %>%
   add_header_above(c(" " = 1, "Power" = "4"))
@@ -1171,6 +1185,7 @@ cover_rate4 <- data.frame(alpha = alpha_vec, cover_rate4)
 ```{r}
 cover_rate4 %>% pivot_longer(starts_with("X")) %>%
   mutate(bsize = as.numeric(gsub("X", "", name))) %>%
+  mutate(alpha=fct_rev(as.factor(alpha))) %>%
   ggplot()+
   geom_line(aes(x=bsize, y=value, group=as.factor(alpha), col=as.factor(alpha)))+
   geom_point(aes(x=bsize, y=value, group=as.factor(alpha), col=as.factor(alpha)))+
@@ -1192,6 +1207,7 @@ array(aperm(slope_mean4, perm = c(1, 3, 2)),
          .before=1) %>%
   pivot_longer(starts_with("X")) %>%
   mutate(bsize = as.numeric(gsub("X", "", name))) %>%
+  mutate(alpha=fct_rev(as.factor(alpha))) %>%
   ggplot()+
   geom_boxplot(aes(x=bsize, y=value, group = bsize))+
   geom_jitter(aes(x=bsize, y=value), size = 0.2)+
@@ -1213,6 +1229,7 @@ array(aperm(slope_sd4, perm = c(1, 3, 2)),
          .before=1) %>%
   pivot_longer(starts_with("X")) %>%
   mutate(bsize = as.numeric(gsub("X", "", name))) %>%
+  mutate(alpha=fct_rev(as.factor(alpha))) %>%
   ggplot()+
   geom_boxplot(aes(x=bsize, y=value, group = bsize))+
   geom_jitter(aes(x=bsize, y=value), size = 0.2)+
@@ -1231,6 +1248,7 @@ array(slope_est4[,,15,], dim = c(length(alpha_vec)*max_size, M)) %>%
          bsize = rep(1:max_size, each = length(ksize_vec)),
          .before = 1) %>% 
   pivot_longer(starts_with("X")) %>%
+  mutate(alpha=fct_rev(as.factor(alpha))) %>%
   ggplot()+
   geom_boxplot(aes(x=bsize, y=value, group=bsize))+
   geom_jitter(aes(x=bsize, y=value, group=bsize), size=0.2)+
@@ -1238,3 +1256,103 @@ array(slope_est4[,,15,], dim = c(length(alpha_vec)*max_size, M)) %>%
   labs(x="Block size", title = "Bootstrap slope estiamtes of subject 15")+
   geom_hline(yintercept = 1, col="red", linetype = "dashed")
 ```
+
+
+# Introduced bivariate correlation through spatial intercorrelation
+
+Why couldn't the block bootstrap approach reach nomial type I error/coverage rate? One speculation is that through generating the two outcomes separately from the same mechanism to introduce spacial intercorrelation, we introduced correlation between the two variables. 
+
+To explore that, I wanna look into the residuals after susbtrating the effect of $Y_1$ on $Y_2$, in the original image and the bootstrap samples.
+
+Let's start with one subject (subject 15). I will do the block bootstrap with different block size, and visualize the residual intercorrelation. Putting the bootstrap blocks back to its original 2D format is in fact a very challenging problem. I still haven't thought of good ways to do that. 
+
+```{r, eval=FALSE}
+df_id15 <- df_subj %>% filter(id == 15)
+# simple linear regression
+res_id15 <- df_id15 %>% group_by(ksize) %>% 
+    group_modify(~{
+      fit_lm <- lm(Y2~Y1, data = .x)
+      data.frame(res = fit_lm$residuals)
+    }) %>% ungroup()
+
+res_id15 <- res_id15 %>% mutate(s1 = df_id15$s1, s2 = df_id15$s2)
+
+res_id15 %>% ggplot()+
+  geom_tile(aes(x=s1, y=s2, fill=res))+
+  facet_wrap(~ksize)
+```
+
+```{r, eval=FALSE}
+# containers
+slope_est5 <- matrix(NA, nrow = length(ksize_vec), ncol = max_size)
+res_list <- list()
+```
+
+
+```{r, eval=FALSE}
+for(k in seq_along(ksize_vec)){ # filter size for data generation
+  
+  res_list[[k]] <- list()
+  
+  # A matrix of observed outcome
+  this_df <- df_id15 %>% filter(ksize==ksize_vec[k])
+  Y_mat <- matrix(this_df$Y2, nS, nS)
+  
+  for(b in 1:max_size){ # block size for bootstrap
+    
+      
+      # divide the matrix into blocks
+      rblock <- (row(Y_mat)-1)%/%b+1
+      cblock <- (col(Y_mat)-1)%/%b+1
+      block_id_mat <- (rblock-1)*max(cblock) + cblock
+      nblock <- max(block_id_mat)
+      
+      # sample blocks
+      # sample the same number of blocks as the original image
+      this_df$block_id <- as.vector(block_id_mat)
+      block_list <- split(this_df, f = this_df$block_id)
+      
+      # for(m in 1:M){
+      boot_block <- sample(1:nblock, size = nblock, replace = T)
+      boot_df <- block_list[boot_block]
+      boot_df <- bind_rows(boot_df)
+      
+      # fit model
+      boot_lm <-  lm(Y2~Y1, data = boot_df)
+      slope_est5[k, b] <- boot_lm$coefficients["Y1"]
+      boot_df$res <- boot_lm$residuals
+      
+      # put residuals back to its original 2D format
+      boot_df %>% mutate(block_id = as.character(block_id)) %>%
+        mutate(block_id = factor(block_id, levels = levels(block_id), labels = 1:nblock))
+      
+  }
+}
+t2 <- Sys.time()
+
+boot_df %>% arrange(s1, s2)
+```
+
+
+```{r, eval=FALSE}
+# put the residuals back in the 2D image
+
+for()
+
+
+boot_img <- matrix(NA, nS, nS)
+
+df_try <- res_list[[5]][[3]] %>%
+  group_by(block_id) %>% 
+  mutate(s1 = s1-min(s1)+1,
+         s2 = s2-min(s2)+1) %>%
+  mutate(ncol = max(s2), nrow = max(s1))
+
+table(df_try$s1)
+```
+
+
+
+
+
+

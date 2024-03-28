@@ -7,9 +7,11 @@
 ## bsize: block size. We only use square block for now
 ## M: number of boostrap iteration
 ## nS: image size
+## model: whether or not to return the linear model 
 
 # Notes: blocks are sampled with equal probablity
 #       so that the expectated size of sampled image is the same with the original image
+
 
 BlockBoot <- function(df, bsize, M=1000, nS = 32){
   

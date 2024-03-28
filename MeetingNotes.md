@@ -35,4 +35,9 @@ Next steps:
 
 # 23/3/26
 1. In the block bootstrap, investigate the correlation between residuals, after substracting the fixed effects.
-- Maybe semivariograms for residuals?  
+- Maybe semivariograms for residuals? 
+
+https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9308704/
+
+PS: how to simulate data that looks like lesion
+- changing the step size of moving average? 
