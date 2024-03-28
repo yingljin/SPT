@@ -34,6 +34,7 @@ library(sp)
 ## data generation
 ksize_vec <- seq(1, 9, by = 2) # filter size
 alpha_vec <- c(0, 0.5, 1, 2.5, 5) # weight matrix
+stride_vec <- 0:4
 
 nS <- 32 # space grid
 Nf <- 1000 # generate 1000 subjects over all, but use only 100 for the block bootstrap
@@ -103,7 +104,7 @@ ma_ksize %>% pivot_longer(starts_with("k")) %>%
 
 Below I plot the variogram function at different kernel sizes. Variogram is a measure of spatial dependence as a function of distance. Smaller value indicates greater dependence.
 
-```{r variogram_ksize, fig.height=10, fig.width=5}
+```{r variogram_ksize, fig.height=3, fig.width=15}
 bind_rows(
   variogram(k1~1, locations = ~s1+s2, data = ma_ksize) %>% mutate(ksize = 1),
   variogram(k3~1, locations = ~s1+s2, data = ma_ksize) %>% mutate(ksize = 3),
@@ -112,8 +113,9 @@ bind_rows(
   variogram(k9~1, locations = ~s1+s2, data = ma_ksize) %>% mutate(ksize = 9)
 ) %>%
   ggplot()+
-  geom_line(aes(x=dist, y=gamma, col=as.factor(ksize)))+
-  labs(y="Sample variagram", col = "Filter size")
+  geom_line(aes(x=dist, y=gamma))+
+  facet_wrap(~ksize, nrow = 1, scales = "free_y")+
+  labs(y="Sample variagram")
 ```
 
 Some observations:
@@ -188,7 +190,7 @@ ma_wt %>% pivot_longer(starts_with("alpha")) %>%
   facet_wrap(~name, nrow = 1)
 ```
 
-```{r variogram_wt, fig.height=10, fig.width=5}
+```{r variogram_wt, fig.height=3, fig.width=15}
 bind_rows(
   variogram(alpha0~1, locations = ~s1+s2, data = ma_wt) %>% mutate(alpha = 0),
   variogram(alpha0.5~1, locations = ~s1+s2, data = ma_wt) %>% mutate(alpha = 0.5),
@@ -198,8 +200,46 @@ bind_rows(
 ) %>%
   mutate(alpha=fct_rev(as.factor(alpha))) %>%
   ggplot()+
-  geom_line(aes(x=dist, y=gamma, col=alpha))+
-  labs(y="Sample variagram", col = "Alpha")
+  geom_line(aes(x=dist, y=gamma))+
+  facet_wrap(~alpha, nrow=1, scales = "free_y")+
+  labs(y="Sample variagram")
+```
+
+
+## Step size of filter
+
+Is it possible to get non-monotone variogram by changing the step size in the data generation procedure? 
+
+
+```{r stride_size}
+ma_stride <- expand_grid(s2=1:32, s1=1:32)
+
+
+for(i in stride_vec){
+  MAerr_mat <- MA_rand_field_step(kf = 5, ki = 32, stride = i)
+  ma_stride[, paste0("str", i)] <- as.vector(MAerr_mat)
+}
+```
+
+```{r heatmat_stride, fig.height=3, fig.width=15}
+ma_stride %>% pivot_longer(starts_with("str")) %>%
+  ggplot()+
+  geom_tile(aes(x=s1, y=s2, fill=value))+
+  facet_wrap(~name, nrow = 1)
+```
+
+```{r variogram_stride, fig.height=3, fig.width=15}
+bind_rows(
+  variogram(str0~1, locations = ~s1+s2, data = ma_stride) %>% mutate(stride = 0),
+  variogram(str1~1, locations = ~s1+s2, data = ma_stride) %>% mutate(stride = 1),
+  variogram(str2~1, locations = ~s1+s2, data = ma_stride) %>% mutate(stride = 2),
+  variogram(str3~1, locations = ~s1+s2, data = ma_stride) %>% mutate(stride = 3),
+  variogram(str4~1, locations = ~s1+s2, data = ma_stride) %>% mutate(stride = 4)
+) %>%
+  ggplot()+
+  geom_line(aes(x=dist, y=gamma))+
+  facet_wrap(~stride, nrow = 1, scales = "free_y")+
+  labs(y="Sample variagram", col = "Stride size")
 ```
 
 
