@@ -34,7 +34,7 @@ library(sp)
 ## data generation
 ksize_vec <- seq(1, 9, by = 2) # filter size
 alpha_vec <- c(0, 0.5, 1, 2.5, 5) # weight matrix
-stride_vec <- 0:4
+stride_vec <- seq(0, 8, by = 2)
 
 nS <- 32 # space grid
 Nf <- 1000 # generate 1000 subjects over all, but use only 100 for the block bootstrap
@@ -215,9 +215,10 @@ Is it possible to get non-monotone variogram by changing the step size in the da
 ma_stride <- expand_grid(s2=1:32, s1=1:32)
 
 
-for(i in stride_vec){
-  MAerr_mat <- MA_rand_field_step(kf = 5, ki = 32, stride = i)
-  ma_stride[, paste0("str", i)] <- as.vector(MAerr_mat)
+for(i in seq_along(stride_vec)){
+  sti_size <- stride_vec[i]
+  MAerr_mat <- MA_rand_field_step(kf = 5, ki = 32, stride = sti_size)
+  ma_stride[, paste0("str", sti_size)] <- as.vector(MAerr_mat)
 }
 ```
 
@@ -228,20 +229,22 @@ ma_stride %>% pivot_longer(starts_with("str")) %>%
   facet_wrap(~name, nrow = 1)
 ```
 
-```{r variogram_stride, fig.height=3, fig.width=15}
+```{r variogram_stride, fig.height=8, fig.width=6}
 bind_rows(
   variogram(str0~1, locations = ~s1+s2, data = ma_stride) %>% mutate(stride = 0),
-  variogram(str1~1, locations = ~s1+s2, data = ma_stride) %>% mutate(stride = 1),
   variogram(str2~1, locations = ~s1+s2, data = ma_stride) %>% mutate(stride = 2),
-  variogram(str3~1, locations = ~s1+s2, data = ma_stride) %>% mutate(stride = 3),
-  variogram(str4~1, locations = ~s1+s2, data = ma_stride) %>% mutate(stride = 4)
+  variogram(str4~1, locations = ~s1+s2, data = ma_stride) %>% mutate(stride = 4),
+  variogram(str6~1, locations = ~s1+s2, data = ma_stride) %>% mutate(stride = 6),
+  variogram(str8~1, locations = ~s1+s2, data = ma_stride) %>% mutate(stride = 8)
 ) %>%
-  ggplot()+
-  geom_line(aes(x=dist, y=gamma))+
-  facet_wrap(~stride, nrow = 1, scales = "free_y")+
+  ggplot(aes(x=dist, y=gamma, col = as.factor(stride)))+
+  geom_line()+
+  geom_point()+
+  # facet_wrap(~stride, nrow = 1, scales = "free_y")+
   labs(y="Sample variagram", col = "Stride size")
 ```
 
+All five datasets had pretty strong spatial independence. Changing the step size does not seem to affect the spatial independence too much. The direction of effect is also uncertain. 
 
 # Bivariate correlation testing under null hypothesis
 
@@ -1304,9 +1307,11 @@ Why couldn't the block bootstrap approach reach nomial type I error/coverage rat
 
 To explore that, I wanna look into the residuals after susbtrating the effect of $Y_1$ on $Y_2$, in the original image and the bootstrap samples.
 
-Let's start with one subject (subject 15). I will do the block bootstrap with different block size, and visualize the residual intercorrelation. Putting the bootstrap blocks back to its original 2D format is in fact a very challenging problem. I still haven't thought of good ways to do that. 
+Let's start with one subject (subject 15). I will do the block bootstrap with different block size, and visualize the residual inter-correlation. This turned out to be quite a challenging problem, because to plot the semivariogram, we need each pixel to have a location index. And it is not straight foward to do that, putting the sampled blocks into the original 2D format. 
 
-```{r, eval=FALSE}
+## Filter size
+
+```{r, fig.height=3 ,fig.width=15}
 df_id15 <- df_subj %>% filter(id == 15)
 # simple linear regression
 res_id15 <- df_id15 %>% group_by(ksize) %>% 
@@ -1319,7 +1324,7 @@ res_id15 <- res_id15 %>% mutate(s1 = df_id15$s1, s2 = df_id15$s2)
 
 res_id15 %>% ggplot()+
   geom_tile(aes(x=s1, y=s2, fill=res))+
-  facet_wrap(~ksize)
+  facet_wrap(~ksize,)
 ```
 
 ```{r, eval=FALSE}
@@ -1336,7 +1341,9 @@ for(k in seq_along(ksize_vec)){ # filter size for data generation
   
   # A matrix of observed outcome
   this_df <- df_id15 %>% filter(ksize==ksize_vec[k])
+  this_df[, paste0("res_k", 1:max_size)] <- NA
   Y_mat <- matrix(this_df$Y2, nS, nS)
+  
   
   for(b in 1:max_size){ # block size for bootstrap
     
@@ -1354,45 +1361,55 @@ for(k in seq_along(ksize_vec)){ # filter size for data generation
       
       # for(m in 1:M){
       boot_block <- sample(1:nblock, size = nblock, replace = T)
-      boot_df <- block_list[boot_block]
-      boot_df <- bind_rows(boot_df)
+      boot_list <- block_list[boot_block]
+      names(boot_list) <- as.character(1:nblock)
+      boot_df <- bind_rows(boot_list, .id="new_block_id")
       
       # fit model
       boot_lm <-  lm(Y2~Y1, data = boot_df)
       slope_est5[k, b] <- boot_lm$coefficients["Y1"]
       boot_df$res <- boot_lm$residuals
+      new_boot_list <- split(boot_df, f=boot_df$new_block_id)
       
       # put residuals back to its original 2D format
-      boot_df %>% mutate(block_id = as.character(block_id)) %>%
-        mutate(block_id = factor(block_id, levels = levels(block_id), labels = 1:nblock))
+      res_mat <- matrix(NA, nrow = sqrt(nblock)*b, ncol = sqrt(nblock)*b)
+      rblock2 <- (row(res_mat)-1)%/%b+1
+      cblock2 <- (col(res_mat)-1)%/%b+1
+      block_id_mat2 <- (rblock2-1)*max(cblock2) + cblock2
+      res_df <- data.frame(block_id_mat2) %>% mutate(s1 = 1:(sqrt(nblock)*b), .before=1) %>%
+        pivot_longer(starts_with("X"), names_to = "s2", values_to = "block_id") %>%
+        mutate(s2 = gsub("X", "", s2)) %>% 
+        arrange(block_id, s2) %>% 
+        mutate(res=NA)
+
+      for(l in 1:nblock){
+        res_df$res[res_df$block_id==l][1:nrow(new_boot_list[[l]])] <- new_boot_list[[l]]$res
+      }
+      
+      res_list[[k]][[b]] <- res_df
       
   }
 }
 t2 <- Sys.time()
 
-boot_df %>% arrange(s1, s2)
+
 ```
 
 
 ```{r, eval=FALSE}
 # put the residuals back in the 2D image
-
-for()
-
-
-boot_img <- matrix(NA, nS, nS)
-
-df_try <- res_list[[5]][[3]] %>%
-  group_by(block_id) %>% 
-  mutate(s1 = s1-min(s1)+1,
-         s2 = s2-min(s2)+1) %>%
-  mutate(ncol = max(s2), nrow = max(s1))
-
-table(df_try$s1)
+res_list[[k]] %>%
+  lapply(function(x){variogram(res~1, locations = ~s1+s2, data = x %>% filter(!is.na(res)) %>% mutate_all(as.numeric))}) %>% 
+  bind_rows(.id="block_size") %>%
+  ggplot(aes(x=dist, y=gamma, col=as.factor(block_size)))+
+  geom_line()+
+  geom_point()
 ```
 
 
 
+# References
 
+- [Wikipedia](https://en.wikipedia.org/wiki/Variogram#Discussion)
 
 
