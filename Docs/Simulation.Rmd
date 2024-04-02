@@ -1303,15 +1303,17 @@ array(slope_est4[,,15,], dim = c(length(alpha_vec)*max_size, M)) %>%
 
 # Introduced bivariate correlation through spatial intercorrelation
 
-Why couldn't the block bootstrap approach reach nomial type I error/coverage rate? One speculation is that through generating the two outcomes separately from the same mechanism to introduce spacial intercorrelation, we introduced correlation between the two variables. 
+Why couldn't the block bootstrap approach reach nominal type I error/coverage rate? One speculation is that through generating the two outcomes separately from the same mechanism to introduce spatial intercorrelation, we introduced correlation between the two variables. 
 
-To explore that, I wanna look into the residuals after susbtrating the effect of $Y_1$ on $Y_2$, in the original image and the bootstrap samples.
+To explore that, I wanna look into the residuals after subtracting the effect of $Y_1$ on $Y_2$, in the original image and the bootstrap samples.
 
-Let's start with one subject (subject 15). I will do the block bootstrap with different block size, and visualize the residual inter-correlation. This turned out to be quite a challenging problem, because to plot the semivariogram, we need each pixel to have a location index. And it is not straight foward to do that, putting the sampled blocks into the original 2D format. 
+Let's start with one subject (subject 15). I will do the block bootstrap with different block size, and visualize the residual inter-correlation. This turned out to be quite a challenging problem, because to plot the semivariogram, we need each pixel to have a location index. And it is not straight forward to do that, putting the sampled blocks into the original 2D format. 
+
+My way is to create a 2D matrix that I am sure that can fit all the blocks, and put the blocks one by one into their slot, leaving some empty pixels here and there. 
 
 ## Filter size
 
-```{r, fig.height=3 ,fig.width=15}
+```{r, fig.height=3 ,fig.width=15, eval=FALSE}
 df_id15 <- df_subj %>% filter(id == 15)
 # simple linear regression
 res_id15 <- df_id15 %>% group_by(ksize) %>% 
@@ -1324,17 +1326,19 @@ res_id15 <- res_id15 %>% mutate(s1 = df_id15$s1, s2 = df_id15$s2)
 
 res_id15 %>% ggplot()+
   geom_tile(aes(x=s1, y=s2, fill=res))+
-  facet_wrap(~ksize,)
+  facet_wrap(~ksize, )
 ```
 
-```{r, eval=FALSE}
+```{r}
+# subset subject 15
+df_id15 <- df_subj %>% filter(id == 15)
+
 # containers
-slope_est5 <- matrix(NA, nrow = length(ksize_vec), ncol = max_size)
 res_list <- list()
 ```
 
 
-```{r, eval=FALSE}
+```{r bootstrap_residuals}
 for(k in seq_along(ksize_vec)){ # filter size for data generation
   
   res_list[[k]] <- list()
@@ -1367,7 +1371,7 @@ for(k in seq_along(ksize_vec)){ # filter size for data generation
       
       # fit model
       boot_lm <-  lm(Y2~Y1, data = boot_df)
-      slope_est5[k, b] <- boot_lm$coefficients["Y1"]
+      # slope_est5[k, b] <- boot_lm$coefficients["Y1"]
       boot_df$res <- boot_lm$residuals
       new_boot_list <- split(boot_df, f=boot_df$new_block_id)
       
@@ -1396,15 +1400,28 @@ t2 <- Sys.time()
 ```
 
 
-```{r, eval=FALSE}
+- Please pay attention to the **y-axis scale** of the following figures.
+
+```{r, res_variogram}
 # put the residuals back in the 2D image
-res_list[[k]] %>%
-  lapply(function(x){variogram(res~1, locations = ~s1+s2, data = x %>% filter(!is.na(res)) %>% mutate_all(as.numeric))}) %>% 
-  bind_rows(.id="block_size") %>%
-  ggplot(aes(x=dist, y=gamma, col=as.factor(block_size)))+
-  geom_line()+
-  geom_point()
+for(k in seq_along(res_list)){
+  res_plt <- res_list[[k]] %>%
+    lapply(function(x){variogram(res~1, locations = ~s1+s2, data = x %>% filter(!is.na(res))
+                                 %>% mutate_all(as.numeric))}) %>% 
+    bind_rows(.id="block_size") %>%
+    ggplot(aes(x=dist, y=gamma, col=as.factor(block_size)))+
+    geom_line()+
+    geom_point()+
+    labs(title = paste0("Filter size = ", ksize_vec[k]),
+         y = "Variogram", col = "Block size")
+  print(res_plt)
+  
+}
 ```
+
+From the variogram of residuals, for individual subjects, strong spatial correlation remained after block bootstrap, and the size of block did not make much difference. I am still thinking about ways to integrally showing that for multiple bootstrap iterations of multiple subjects. 
+
+Once we do a full boostrap, for one subject at one filter size and one block size, we'll have 1000 semivariogram curves (that is, basically, for each colored curve above, we'll have 1000 copies). Can we just simply plot them and smooth them? 
 
 
 
