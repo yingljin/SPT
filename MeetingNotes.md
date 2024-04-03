@@ -33,7 +33,7 @@ Next steps:
 - Report distribution of estimated beta
 3. Simulate under alternative hypothesis (beta=1 ? ), report coverage probability
 
-# 23/3/26
+# 24/3/26
 1. In the block bootstrap, investigate the correlation between residuals, after substracting the fixed effects.
 - Maybe semivariograms for residuals? 
 
@@ -41,3 +41,9 @@ https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9308704/
 
 PS: how to simulate data that looks like lesion
 - changing the step size of moving average? 
+
+# 24/4/2/
+1. In data generation, look into different grid size
+2. Try to generate data with spatial variogram that looks like the lesion ones
+- Maybe two filters?
+3. Correction factor? 

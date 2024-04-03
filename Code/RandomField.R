@@ -83,7 +83,7 @@ MA_rand_field_step <- function(kf, ki, stride){
   ma_mat <- matrix(NA, ki, ki)
   for(i in 1:ki){
     for(j in 1:ki){ 
-      # simple zverage
+      # simple average
       start_i <- i+(i-1)*stride
       start_j <- j+(j-1)*stride
       ma_mat[i, j] <- mean(Zmat[start_i:(start_i+2*(kf%/%2)), start_j:(start_j+2*(kf%/%2))])

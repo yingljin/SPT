@@ -1,0 +1,2 @@
+A MIME attachment of type <application/zip> was removed here
+ by a drop-attachments-by-name filter rule on the host <uphsmtpvaplt07.uphs.upenn.edu>.
