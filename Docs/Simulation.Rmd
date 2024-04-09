@@ -30,10 +30,15 @@ library(magick)
 ```
 
 
+```{r}
+load(here("Data/sim_H0_ksize.RData"))
+```
+
+
 ```{r global_parms}
 # global parameters
 ## data generation
-ksize_vec <- seq(1, 9, by = 2) # filter size
+
 alpha_vec <- c(0, 0.5, 1, 2.5, 5) # weight matrix
 stride_vec <- seq(0, 8, by = 2)
 
@@ -80,40 +85,39 @@ where:
 - $N_r$ is the number of spacial points within neighborhood $S_r$
 - $Z(\mathbf{s'}, t)$ is a white noise process
 
+
+## Goals
+
+Generate 2D/3D matrices that 
+
+- Resemble actual WMF and QSM measure from MS lesion
+- Two correlated outcomes
+- Within each outcome, spatial correlation varies across individual. For inference purposes, we also hope to control the spatial correlation. 
+
 ## Effect of filter size on spatial correlation
 
 In this section, we would like to see if the filter size of moving average would affect the spatial correlation. Here we generate 2D image of 32 by 32. Note that filter size should be odd numbers, a convention inherited from image analysis. Thought even size filter is technically possible, it is much more convenienve to use odd size for many operations since it would have a center pixel
 
-
-```{r k_size}
-ma_ksize <- expand_grid(s2=1:32, s1=1:32)
-
-
-for(i in seq_along(ksize_vec)){
-  MAerr_mat <- MA_rand_field(kf = ksize_vec[i], ki = 32)
-  ma_ksize[, paste0("k", ksize_vec[i])] <- as.vector(MAerr_mat)
-}
-```
-
 ```{r heatmat_ksize, fig.height=3, fig.width=15}
-ma_ksize %>% pivot_longer(starts_with("k")) %>%
-  mutate(name=factor(name, levels = paste0("k", ksize_vec))) %>%
+df_ksize %>%
+  filter(id==1) %>% 
   ggplot()+
-  geom_tile(aes(x=s1, y=s2, fill=value))+
-  facet_wrap(~name, nrow = 1)
+  geom_tile(aes(x=s1, y=s2, fill=Y1))+
+  facet_wrap(~ksize, nrow = 1)
 ```
 
 
 Below I plot the variogram function at different kernel sizes. Variogram is a measure of spatial dependence as a function of distance. Smaller value indicates greater dependence.
 
 ```{r variogram_ksize, fig.height=8, fig.width=5}
-ma_ksize %>% pivot_longer(starts_with("k")) %>%
-  mutate(name=factor(name, levels = paste0("k", ksize_vec))) %>%
-  group_by(name) %>%
-  group_modify(~{variogram(value~1, location = ~s1+s2, data = .x)}) %>%
+df_ksize %>%
+  filter(id==1) %>%
+  mutate(ksize = as.factor(ksize)) %>%
+  group_by(ksize) %>%
+  group_modify(~{variogram(Y1~1, location = ~s1+s2, data = .x)}) %>%
   ggplot()+
-  geom_line(aes(x=dist, y=gamma, col=name))+
-  geom_point(aes(x=dist, y=gamma, col=name))+
+  geom_line(aes(x=dist, y=gamma, col=ksize))+
+  geom_point(aes(x=dist, y=gamma, col=ksize))+
   labs(y="Sample variagram")+
   scale_y_log10()
 ```
@@ -247,7 +251,8 @@ I have certain expectations of the variograms:
 
 We do see that if we do the simulation repeatedly. Please note that the range of y axis is a small, so any tiny difference would appear huge in this figure. 
 
-## Lesion semivariogram
+## Effect of weight function shape
+
 
 The variograms from Amy took on many wild shapes! It seems that semivariance structure varies greatly across lesions, though the "peak" shape is pretty common. I am not sure how I'd be able to generate all these different spatial correlations. Intuitivly, I'd like to start with different weights. Maybe use non-monotone functions for weight. 
 
@@ -258,36 +263,12 @@ For now, let's fix the filter size to be 5 by 5.
 First, let's create some different types of filters
 
 - A reverse U-shape: $w_{ij} \propto (d_{ij}-1.5)^2$
-- An increasing function: $w_{ij} \propto exp(d_{ij})$
+- An increasing function: $w_{ij} \propto exp(max\{d_{ij}\}-d_{ij})$. The $max\{d_{ij}\}$ term is to scale the value of weight down to a range that is comparable to the other functions. 
 - An decreasing function: $w_{ij} \propto exp(-d_{ij})$
 - A periodic function: $w_{ij} \propto sin(2\pi d_{ij}/max(d_{ij}))$
 - Another periodic function: $w_{ij} \propto cos(2\pi d_{ij}/max(d_{ij}))$
 
 Note that the trigonometric functions have negative weight.
-
-```{r wma_func2}
-MWA_rand_field2 <- function(kf, ki, wt){
-  
-  # generate a white noise image
-  # notice that this image is larger than the target image
-  # so that there is no need for padding
-  kz <- ki+2*(kf%/%2) # size of the white noise 
-  Zmat <- matrix(rnorm(kz^2, 0, 1), kz, kz)
-  
-  # moving average
-  ma_mat <- matrix(NA, ki, ki)
-  for(i in 1:ki){
-    for(j in 1:ki){ 
-      # simple zverage
-      ma_mat[i, j] <- mean(Zmat[i:(i+2*(kf%/%2)), j:(j+2*(kf%/%2))]*wt)
-      
-    }
-  }
-  
-  return(ma_mat)
-  
-}
-```
 
 ```{r wt_mat}
 # proportional to inverse exponential Euclidian to center (to avoid zero demonimator)
@@ -296,11 +277,13 @@ df_wt_type <- expand_grid(s1 = 1:5, s2 = 1:5)
 
 # Euclidean distance to center
 df_wt_type$dist <- sqrt((df_wt_type$s1-3)^2+(df_wt_type$s2-3)^2)
+# range(df_wt_type$dist)
+# exp(2.83)
 
 # what if weight is a reverse U shape function wrt distance? 
 df_wt_type <- df_wt_type %>% 
   mutate(wt_u = (dist-1.5)^2) %>% 
-  mutate(wt_inc = exp(dist)) %>% 
+  mutate(wt_inc = exp(dist-max(dist))) %>% 
   mutate(wt_dec = exp(-dist)) %>% 
   mutate(wt_sin = sin(2*pi*dist/max(dist))) %>%
   mutate(wt_cos = cos(2*pi*dist/max(dist))) #%>%
@@ -310,9 +293,10 @@ df_wt_type <- df_wt_type %>%
 ```
 
 
-```{r, fig.height=3, fig.width=12, eval=FALSE}
+```{r, fig.height=3, fig.width=15}
 df_wt_type %>%
   pivot_longer(starts_with("wt_")) %>%
+  mutate(name=factor(name, levels = c("wt_inc", "wt_dec", "wt_u", "wt_sin", "wt_cos"))) %>%
   ggplot(aes(x=s1, y=s2, fill = value))+
   geom_tile()+
   facet_wrap(~name, nrow = 1)+
@@ -322,6 +306,7 @@ df_wt_type %>%
 ```{r, fig.height=3, fig.width=15}
 df_wt_type %>%
   pivot_longer(starts_with("wt_")) %>%
+  mutate(name=factor(name, levels = c("wt_inc", "wt_dec", "wt_u", "wt_sin", "wt_cos"))) %>%
   ggplot(aes(x=dist, y= value))+
   geom_line()+
   geom_point()+
@@ -355,18 +340,24 @@ ma_wt_type %>%
   facet_wrap(~name, nrow = 1)
 ```
 
-```{r, fig.height=3, fig.width=15}
+```{r, fig.height=8, fig.width=5}
 ma_wt_type %>%
   pivot_longer(starts_with("wt_")) %>%
   group_by(name) %>%
   group_modify(~{variogram(value ~ 1, locations = ~s1+s2, data = .x)}) %>%
-  ggplot(aes(x=dist, y=gamma))+
+  ggplot(aes(x=dist, y=gamma, col=name))+
   geom_line()+
-  geom_point()+
-  facet_wrap(~name, nrow = 1, scales = "free_y")
+  geom_point()
   
 ```
 
+
+## Some notes
+
+1. Semivariograms should really be increasing. If it is not, it is probably a result for noise or heterogeneity (variance change across location).
+- But alternatively, if we only interested in local correlation, we wouldn't need semivariograms! We only need the estimates filter weights for that. 
+2. If the goal is only to simulate data that looks like the real data, it might be better to use standard image simulation model and learn the weight matrix
+2. Block bootstrap: Hierarchical clustering
 
 # Bivariate correlation testing under null hypothesis
 
@@ -932,6 +923,73 @@ array(slope_est2[,,15,], dim = c(length(alpha_vec)*max_size, M)) %>%
   labs(x="Block size", title = "Bootstrap slope estiamtes of subject 15")+
   geom_hline(yintercept = 0, col="red", linetype = "dashed")
 ```
+
+
+## Effect of shape of weight function 
+
+In this section, filter size is fixed at 5. Data is generated from different functional shape of weight function (wrt) distance
+
+```{r data_example_wt_type, fig.height=6, fig.width=15}
+df_subj3$wt_type <- factor(df_subj3$wt_type, levels = c("wt_inc", "wt_dec", "wt_u", "wt_sin", "wt_cos"))
+df_subj3 %>% 
+  filter(id==15) %>%
+  pivot_longer(starts_with("Y")) %>%
+  ggplot()+
+  geom_tile(aes(x=s1, y=s2, fill = value))+
+  facet_grid(cols=vars(wt_type), rows = vars(name))+
+  labs(title = "Generated data of subject ID = 15")
+```
+
+### Simple linear regression
+
+```{r, fig.height=12, fig.width=15}
+df_subj3 %>% 
+  filter(id %in% sample(1:N, size = 4)) %>%
+  # mutate(alpha=fct_rev(as.factor(alpha))) %>%
+  ggplot(aes(x=Y1, y=Y2))+
+  geom_point(size = 0.2)+
+  geom_smooth(formula = 'y~x', method = "lm")+
+  stat_cor(method = "pearson")+
+  facet_grid(rows = vars(id), cols = vars(wt_type))+
+  labs(title = "Perason correlation of four subject")
+```
+
+
+```{r lm3}
+lm_err3 <- data.frame(wt_type=unique(df_subj3$wt_type))
+# N_vec <- c(100, 200, 500, 1000)
+
+for(n in seq_along(N_vec)){
+  
+  err_n <- df_subj3 %>%
+    filter(id <= N_vec[n]) %>%
+    group_by(id, wt_type) %>%
+    group_modify(~{
+      fit_lm <- lm(Y2~Y1, data = .x)
+      data.frame(beta = coef(fit_lm)["Y1"], 
+                 pval = summary(fit_lm)$coefficients["Y1", "Pr(>|t|)"])
+    }) %>%
+    mutate(reject = pval < 0.05) %>%
+    group_by(wt_type) %>%
+    summarise_at("reject", mean) 
+  
+  lm_err3[, paste0("N", N_vec[n])] <- err_n$reject
+  
+}
+```
+
+
+```{r}
+lm_err3 %>%
+  # rename("Alpha" = "ksize") %>%
+  # arrange(desc(alpha)) %>%
+  # mutate(alpha=fct_rev(as.factor(alpha))) %>%
+  kable(table.attr = "style=\"color:black;\"") %>%
+  kable_styling(full_width = F) %>%
+  add_header_above(c(" " = 1, "Type I error" = "4"))
+
+```
+
 
 # Bivariate correlation testing under alternative hypothesis
 
@@ -1550,5 +1608,6 @@ Once we do a full boostrap, for one subject at one filter size and one block siz
 # References
 
 - [Wikipedia](https://en.wikipedia.org/wiki/Variogram#Discussion)
+
 
 

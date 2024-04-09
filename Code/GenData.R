@@ -1,58 +1,112 @@
-# This script is a function that generates spatial-temporal correlated data
-# for one single subject
+# This script generate data using a weighted average filter
 
+##### Set-up #####
 
-N <- 100 # sample size
-# generate individual score
-xi_mat <- mvtnorm::rmvnorm(N, mean = rep(0, 2*K), sigma = diag(rep(1, 2*K)))
+alpha_vec <- c(0, 0.5, 1, 2.5, 5) # weight matrix
+stride_vec <- seq(0, 8, by = 2)
 
+nS <- 32 # space grid
+Nf <- 1000 # generate 1000 subjects over all, but use only 100 for the block bootstrap
 
+## block bootstrap
+max_size <- 9 # max block
+M <- 1000 # number of bootstrap iter
 
-for(i in 1:N){
+#### Null Hypothesis, Filter size ####
+
+# generated data using simple average with different filter size 
+ksize_vec <- seq(1, 9, by = 2) # filter size
+
+# container
+df_ksize<- expand_grid(ksize = ksize_vec, id=1:Nf, s2=1:nS, s1 = 1:nS)
+df_ksize$Y1 <- df_ksize$Y2 <- NA
+
+# generate outcomes
+pb <- txtProgressBar(min=0, max=Nf, style = 3)
+
+t1 <- Sys.time()
+for(i in 1:Nf){ # fix a subject
   
-  # moving average noise
-  Zmat <- matrix(rnorm(length(s1)*length(s2), 0, 1), length(s1), length(s2))
-  MAmat <- MA_rand_field(15, Zmat)
-  df_all[df_all$id==i, "err"] <- as.vector(MAmat)
+  for(k in seq_along(ksize_vec)){ # fix a time point
+    
+    # simple average: equal weight
+    wt <- matrix(1, ksize_vec[k], ksize_vec[k])
+    
+    # generate Y1
+    ## a moving average error
+    Y1 <- MWA_rand_field(ksize_vec[k], nS, wt = wt)
+    df_ksize$Y1[df_ksize$ksize==ksize_vec[k] & df_ksize$id==i] <- as.vector(Y1)
+    
+    # generate Y2
+    ## a moving average error
+    Y2 <- MWA_rand_field(ksize_vec[k], nS, wt = wt)
+    df_ksize$Y2[df_ksize$ksize==ksize_vec[k] & df_ksize$id==i] <- as.vector(Y2)
+  }
   
-  df_i <- expand.grid(s1=s1, s2=s2) %>% mutate(err = as.vector(MAmat))
-  
-  # the first outcome
-  
-  
-  
-  
+  setTxtProgressBar(pb, i)
 }
+t2 <- Sys.time()
 
-GenData <- function(K1=2, K2=2, ma_size=15, s1=1:256, s2 = 1:256, 
-                    t = seq(0.2, 1, by = 0.2), xi){
+close(pb)
 
-  # moving average noise
-  Zmat <- matrix(rnorm(length(s1)*length(s2), 0, 1), length(s1), length(s2))
-  MAmat <- MA_rand_field(ma_size, Zmat)
-  df_i <- expand.grid(s1=s1, s2=s2) %>% mutate(err = as.vector(MAmat))
+t2-t1 # 7 minutes
+
+
+# save data
+save(df_ksize, file = here("Data/sim_H0_ksize.RData"))
+
+
+#### Null Hypothesis, Weight ####
+
+#### Null Hypothesis, Weight type ####
+
+#### Different weight matrix type ####
+# types of weight matrices to look into
+wt_type_vec <- c("wt_inc", "wt_dec", "wt_u", "wt_sin", "wt_cos")
+
+df_subj3 <- expand_grid(wt_type = wt_type_vec, id=1:Nf, s2=1:nS, s1 = 1:nS)
+df_subj3$Y1 <- df_subj3$Y2 <- NA
+
+
+
+pb <- txtProgressBar(min=0, max=Nf, style = 3)
+
+t1 <- Sys.time()
+for(i in 1:Nf){ # fix a subject
   
-  # generate score
+  for(k in seq_along(wt_type_vec)){ # fix a type of weight
+    
+    # weight matrix
+    this_wt <- matrix(as_vector(df_wt_type[, wt_type_vec[k]]), 5, 5)
+    
+    # generate Y1
+    MAerr_mat1 <- MWA_rand_field2(kf = 5, ki = 32, wt = this_wt)
+    df_subj3$Y1[df_subj3$id==i & df_subj3$wt_type==wt_type_vec[k]] <- as.vector(MAerr_mat1)
+    
+    # generate Y1
+    MAerr_mat2 <- MWA_rand_field2(kf = 5, ki = 32, wt = this_wt)
+    df_subj3$Y2[df_subj3$id==i & df_subj3$wt_type==wt_type_vec[k]] <- as.vector(MAerr_mat2)
+  }
   
-  
+  setTxtProgressBar(pb, i)
 }
+t2 <- Sys.time()
 
-K <- 2
-# randoms core of Y1 and Y2
-xi <- mvtnorm::rmvnorm(1, mean = rep(0, 2*K), sigma = diag(rep(1, 2*K)))
-```
+close(pb)
+
+t2-t1 # about 8 minutes
 
 
-```{r}
-df_ma$phi1 <- sqrt((df_ma$s1/256-mean(s1)/256)^2+(df_ma$s2/256-mean(s2)/256)^2)
-df <- expand_grid(df_ma, t=t)
 
-# the first outcome
-df <- df %>%
-  mutate(Y1 = phi1*xi[1]+t*xi[2]+k15)
 
-# the second outcome
-df <- df %>% mutate(Y2 = 2*t*Y1+xi[3]*phi1+xi[4]*t)
-df$Y2 <- df$Y2+rnorm(nrow(df), 0, 0.2)
 
-```
+
+
+df_subj3 %>% 
+  filter(id==1) %>%
+  pivot_longer(starts_with("Y")) %>%
+  ggplot()+
+  geom_tile(aes(x=s1, y=s2, fill = value))+
+  facet_grid(cols=vars(wt_type), rows = vars(name))+
+  labs(title = "Generated data of subject ID = 15")
+

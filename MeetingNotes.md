@@ -42,8 +42,24 @@ https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9308704/
 PS: how to simulate data that looks like lesion
 - changing the step size of moving average? 
 
-# 24/4/2/
+# 24/4/2
 1. In data generation, look into different grid size
 2. Try to generate data with spatial variogram that looks like the lesion ones
 - Maybe two filters?
 3. Correction factor? 
+
+# 24/4/9
+Some notes after talking with Antonio: 
+
+1. Semivariograms should really be increasing. If it is not, it is probably a result for noise or heterogeneity (variance change across location).
+- But alternatively, if we only interested in local correlation, we wouldn't need semivariograms! We only need the estimates filter weights for that. 
+2. If the goal is only to simulate data that looks like the real data, it might be better to use standard image simulation model and learn the weight matrix
+2. Block bootstrap: Hierarchical clustering
+
+
+Meeting with Andrew:
+
+1. Block bootstrap with the diverse weight matrix
+2. Generate correlated images (Generative adversarial network, diffusion model, etc). 
+3. The weird semivariogram may have to do with edge behaviors. Statistically, the edges pixels seem to be correlated with center pixels. 
+
