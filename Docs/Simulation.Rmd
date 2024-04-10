@@ -30,32 +30,30 @@ library(magick)
 ```
 
 
-```{r}
-load(here("Data/sim_H0_ksize.RData"))
+```{r load_data}
+load(here("Data/sim_H0_ksize.RData")) # filter size
+
+load(here("Data/wt_exp_mat.RData"))
+load(here("Data/sim_H0_expwt.RData")) # exponential weight 
+
+load(here("Data/wt_type.RData"))
+load(here("Data/sim_H0_wt_type.RData")) # shape of weight
+# df_wt_type$wt_type <- factor(df_wt_type, levels = c("wt_inc", "wt_dec", "wt_u", "wt_sin", "wt_cos"))
+
+load(here("Data/sim_H0_stride.RData"))
 ```
 
 
 ```{r global_parms}
-# global parameters
-## data generation
-
-alpha_vec <- c(0, 0.5, 1, 2.5, 5) # weight matrix
-stride_vec <- seq(0, 8, by = 2)
-
-nS <- 32 # space grid
-Nf <- 1000 # generate 1000 subjects over all, but use only 100 for the block bootstrap
 N <- 100 # 100 subjects for block bootstrap
+M <- 1000
+N_vec <- c(100, 200, 500, 1000) # sample size used to test simple linear regression
 
-## block bootstrap
-max_size <- 9 # max block
-M <- 1000 # number of bootstrap iter
+# block size in block bootstrap
+max_size <- 9
 ```
 
 
-```{r source_code}
-source(here("Code/RandomField.R"))
-source(here("Code/BlockBoot.R"))
-```
 
 
 # Generation framework
@@ -128,31 +126,19 @@ Some observations:
 - Larger filter size induces stronger spatial correlation.
 - We have the elbow in most cases (when the filter is not too large), but the decrease after the elbow is a lot slower compared to the lesion data. We may need a weight matrix to make it decrease shaper. 
 
-## Effect of weighted average
+## Effect of weight in exponential weight form
 
 Here, I would like to use weighted average within a filter. Let's fix the kernel size to be 5, and explore effect of difference weight matrix. 
 
-I would like to construct a weight matrix that decay fast from center to border. Let's try using inverse of the exponential of the square of Euclidean distance to center:
+I would like to construct a weight matrix that decay fast from center to border. Let's try using inverse of the exponential of the square of Euclidean distance to center. The weights are scaled such that they are sum to one within the filter. The scaling keep the overall variation of the generated outcome comparable to the other case. 
 
-$$w_{ij} = \frac{exp(-\alpha d_{ij}^2)}{\sum_{i,j=1}^5 exp(-\alpha d_{ij}^2)}$$
+$$w_{ij} \propto exp(-\alpha d_{ij}^2)$$
 
 - $\alpha$ is a positive integer controling for the rate of change of weight wrt distance.
 - $d_{ij}$ is the Euclidean distance between point (i, j) and center of filter. 
 
-```{r weight_matrix}
-# proportional to inverse exponential Euclidian to center (to avoid zero demonimator)
-wt_dist <- array(NA, dim = c(5, 5, length(alpha_vec)))
-for(m in seq_along(alpha_vec)){
-  for(i in 1:5){
-    for(j in 1:5){
-    wt_dist[i,j, m] <- exp(-alpha_vec[m]*((i-3)^2+(j-3)^2))
-    }
-  }
-  
-  # normalization
-  wt_dist[,,m] <- wt_dist[,,m]/sum(wt_dist[,,m]) 
-}
-
+```{r}
+alpha_vec <- c(0, 0.5, 1, 2.5, 5)
 ```
 
 
@@ -160,141 +146,63 @@ for(m in seq_along(alpha_vec)){
 df_wt <- expand.grid(s2=1:5, s1=1:5)
 
 for(m in seq_along(alpha_vec)){
-  df_wt[, paste0("alpha", alpha_vec[m])] <- as.vector(wt_dist[,,m])
+  df_wt[, paste0("alpha", alpha_vec[m])] <- as.vector(wt_exp[,,m])
 }
 
 df_wt %>%
   pivot_longer(starts_with("alpha")) %>% 
-  mutate(name=fct_rev(name)) %>%
   ggplot()+
   geom_tile(aes(x=s1, y=s2, fill=value))+
   facet_wrap(~name, nrow = 1)+
   labs(title = "Weight matrix")
 ```
 
-Here, when $\alpha=5$, the boarder weight can get very, very close to zero (corner pixel: 4.14e-18). The center pixel takes 97.36% of the weight. When $\alpha=0$, the weight matrix gets us a simple average. As $\alpha$ increase, the filter put more weight on the center pixel and less weight on the boarder pixels, leading to lower spatial dependence. 
+Here, when $\alpha=5$, the boarder weight can get very, very close to zero (corner pixel: 4.14e-18). The center pixel takes 97.4% of the weight. When $\alpha=0$, the weight matrix gets us a simple average. As $\alpha$ increase, the filter put more weight on the center pixel and less weight on the boarder pixels, leading to lower spatial dependence. 
 
-
-```{r gen_data_wt}
-ma_wt <- expand_grid(s2=1:32, s1=1:32)
-
-for(m in seq_along(alpha_vec)){
-  
-  this_wt <- wt_dist[,,m]
-  MAerr_mat <- MWA_rand_field(kf = 5, ki = 32, wt = this_wt)
-  ma_wt[, paste0("alpha", alpha_vec[m])] <- as.vector(MAerr_mat)
-  
-}
-```
 
 ```{r heatmat_wt, fig.height=3, fig.width=15}
-ma_wt %>% pivot_longer(starts_with("alpha")) %>%
-  mutate(name=fct_rev(name)) %>%
+df_expwt %>% 
+  filter(id==1) %>%
   ggplot()+
-  geom_tile(aes(x=s1, y=s2, fill=value))+
-  facet_wrap(~name, nrow = 1)
+  geom_tile(aes(x=s1, y=s2, fill=Y1))+
+  facet_wrap(~alpha, nrow = 1)+
+  labs(title = "Generated data")
 ```
 
 ```{r variogram_wt, fig.height=8, fig.width=5}
-ma_wt %>% pivot_longer(starts_with("alpha")) %>%
-  # mutate(name=factor(name, levels = paste0("k", ksize_vec))) %>%
-  group_by(name) %>%
-  group_modify(~{variogram(value~1, location = ~s1+s2, data = .x)}) %>%
-  # mutate(alpha=fct_rev(as.factor(alpha))) %>%
+df_expwt %>% 
+  filter(id==1) %>%
+  mutate(alpha=as.factor(alpha)) %>%
+  group_by(alpha) %>%
+  group_modify(~{variogram(Y1~1, location = ~s1+s2, data = .x)}) %>%
   ggplot()+
-  geom_line(aes(x=dist, y=gamma, col=name))+
-  geom_point(aes(x=dist, y=gamma, col=name))+
+  geom_line(aes(x=dist, y=gamma, col=alpha))+
+  geom_point(aes(x=dist, y=gamma, col=alpha))+
   labs(y="Sample variagram")+
   scale_y_log10()
 ```
 
-
-## Step size of filter
-
-Is it possible to get non-monotone variogram by changing the step size in the data generation procedure? 
+## Effect of functional shape of weight
 
 
-```{r stride_size}
-ma_stride <- expand_grid(s2=1:32, s1=1:32)
+The variograms from Amy took on many wild shapes! It seems that semivariance structure varies greatly across lesions, though the "peak" shape is pretty common. I am not sure how I'd be able to generate all these different spatial correlations. Intuitively, I'd like to start with different types of weights, with different functional shape wrt to Euclidean distance. 
 
-for(i in seq_along(stride_vec)){
-  sti_size <- stride_vec[i]
-  MAerr_mat <- MA_rand_field_step(kf = 5, ki = 32, stride = sti_size)
-  ma_stride[, paste0("str", sti_size)] <- as.vector(MAerr_mat)
-}
-```
-
-```{r heatmat_stride, fig.height=3, fig.width=15}
-ma_stride %>% pivot_longer(starts_with("str")) %>%
-  ggplot()+
-  geom_tile(aes(x=s1, y=s2, fill=value))+
-  facet_wrap(~name, nrow = 1)
-```
-
-```{r variogram_stride}
-ma_stride %>% pivot_longer(starts_with("str")) %>%
-  group_by(name) %>%
-  group_modify(~{variogram(value~1, location = ~s1+s2, data = .x)}) %>%
-  ggplot(aes(x=dist, y=gamma, col = name))+
-  geom_line()+
-  geom_point()+
-  # facet_wrap(~stride, nrow = 1, scales = "free_y")+
-  labs(y="Sample variagram", col = "Stride size")+
-  ylim(0, 0.1)
-```
-
-I have certain expectations of the variograms:
-
-1. when stride >= 4, the semivariogram should look similar and flat, since the adjacent pixels are generated from non-overlapping blocks
-2. when stride < 4, the semivariogram should be incresasing, since adjacent pixels are generated from over lapping blocks, while pixels far away are not
-2. when stride < 4, the starting semivariogram should be higher for larger stride size, since that means less overlap. But eventually they should reach the same level. 
-
-We do see that if we do the simulation repeatedly. Please note that the range of y axis is a small, so any tiny difference would appear huge in this figure. 
-
-## Effect of weight function shape
-
-
-The variograms from Amy took on many wild shapes! It seems that semivariance structure varies greatly across lesions, though the "peak" shape is pretty common. I am not sure how I'd be able to generate all these different spatial correlations. Intuitivly, I'd like to start with different weights. Maybe use non-monotone functions for weight. 
-
-They really come in a variety of shapes and directions. I think the key to achieve such variety may be the type of filter we use. A single filter with specific size and structure would lead to a certain types of shape of semivariance.
-
-For now, let's fix the filter size to be 5 by 5. 
-
-First, let's create some different types of filters
+Let's fix the filter size to be 5 by 5, and then create some different types of filters
 
 - A reverse U-shape: $w_{ij} \propto (d_{ij}-1.5)^2$
-- An increasing function: $w_{ij} \propto exp(max\{d_{ij}\}-d_{ij})$. The $max\{d_{ij}\}$ term is to scale the value of weight down to a range that is comparable to the other functions. 
-- An decreasing function: $w_{ij} \propto exp(-d_{ij})$
+- An decreasing function: $w_{ij} \propto exp(max\{d_{ij}\}-d_{ij})$. The $max\{d_{ij}\}$ term is to scale the value of weight down to a range that is comparable to the other functions. 
+- An increasing function: $w_{ij} \propto exp(d_{ij})$
 - A periodic function: $w_{ij} \propto sin(2\pi d_{ij}/max(d_{ij}))$
 - Another periodic function: $w_{ij} \propto cos(2\pi d_{ij}/max(d_{ij}))$
 
 Note that the trigonometric functions have negative weight.
 
-```{r wt_mat}
-# proportional to inverse exponential Euclidian to center (to avoid zero demonimator)
-dist_mat <- matrix(NA, 5, 5)
-df_wt_type <- expand_grid(s1 = 1:5, s2 = 1:5)
+Here I can't really scaled the weights as before. Since for the trigonometric functions, the sum of weights is likely to be very close to zero, causing the magnitude of scaled weight to be inflated dramatically. The generated data, then, will not have a comparable variation for sure. For example, the sum of cosine weights would be -0.47, and the scaled weight will have a range of (-53.12, 53.12). 
 
-# Euclidean distance to center
-df_wt_type$dist <- sqrt((df_wt_type$s1-3)^2+(df_wt_type$s2-3)^2)
-# range(df_wt_type$dist)
-# exp(2.83)
-
-# what if weight is a reverse U shape function wrt distance? 
-df_wt_type <- df_wt_type %>% 
-  mutate(wt_u = (dist-1.5)^2) %>% 
-  mutate(wt_inc = exp(dist-max(dist))) %>% 
-  mutate(wt_dec = exp(-dist)) %>% 
-  mutate(wt_sin = sin(2*pi*dist/max(dist))) %>%
-  mutate(wt_cos = cos(2*pi*dist/max(dist))) #%>%
-  #mutate_at(vars(starts_with("wt_")), function(x){x/sum(x)})
-
-# lapply(df_wt_type,sum)
-```
 
 
 ```{r, fig.height=3, fig.width=15}
-df_wt_type %>%
+wt_type %>%
   pivot_longer(starts_with("wt_")) %>%
   mutate(name=factor(name, levels = c("wt_inc", "wt_dec", "wt_u", "wt_sin", "wt_cos"))) %>%
   ggplot(aes(x=s1, y=s2, fill = value))+
@@ -304,7 +212,7 @@ df_wt_type %>%
 ```
 
 ```{r, fig.height=3, fig.width=15}
-df_wt_type %>%
+wt_type %>%
   pivot_longer(starts_with("wt_")) %>%
   mutate(name=factor(name, levels = c("wt_inc", "wt_dec", "wt_u", "wt_sin", "wt_cos"))) %>%
   ggplot(aes(x=dist, y= value))+
@@ -316,41 +224,55 @@ df_wt_type %>%
 ```
 
 
-```{r}
-# data
-ma_wt_type <- expand_grid(s2=1:32, s1=1:32)
 
-# weight matrix
-wt_type <- colnames(df_wt_type %>% select(starts_with("wt_")))
-
-for(m in seq_along(wt_type)){
-  
-  this_wt <- matrix(as_vector(df_wt_type[, wt_type[m]]), 5, 5)
-  MAerr_mat <- MWA_rand_field2(kf = 5, ki = 32, wt = this_wt)
-  ma_wt_type[, wt_type[m]] <- as.vector(MAerr_mat)
-  
-}
-```
 
 ```{r, fig.height=3, fig.width=15}
-ma_wt_type %>%
-  pivot_longer(starts_with("wt_")) %>%
-  ggplot(aes(x=s1, y=s2, fill=value))+
+df_wt_type %>%
+  filter(id==1) %>%
+  mutate(wt_type = factor(wt_type, levels = c("wt_inc", "wt_dec", "wt_u", "wt_sin", "wt_cos"))) %>%
+  ggplot(aes(x=s1, y=s2, fill=Y1))+
   geom_tile()+
-  facet_wrap(~name, nrow = 1)
+  facet_wrap(~wt_type, nrow = 1)+
+  labs(title = "Example of generated data")
 ```
 
-```{r, fig.height=8, fig.width=5}
-ma_wt_type %>%
-  pivot_longer(starts_with("wt_")) %>%
-  group_by(name) %>%
-  group_modify(~{variogram(value ~ 1, locations = ~s1+s2, data = .x)}) %>%
-  ggplot(aes(x=dist, y=gamma, col=name))+
+```{r, fig.height=5, fig.width=5}
+df_wt_type %>%
+  filter(id==1) %>% 
+  mutate(wt_type = factor(wt_type, levels = c("wt_inc", "wt_dec", "wt_u", "wt_sin", "wt_cos"))) %>%
+  group_by(wt_type) %>%
+  group_modify(~{variogram(Y1 ~ 1, locations = ~s1+s2, data = .x)}) %>%
+  ggplot(aes(x=dist, y=gamma, col=wt_type))+
   geom_line()+
-  geom_point()
+  geom_point()+
+  labs(y="Semivariance")
   
 ```
 
+
+## Step size of filter
+
+Is it possible to get non-monotone variogram by changing the step size in the data generation procedure? 
+
+
+```{r variogram_stride}
+df_stride %>%
+  mutate(stride=as.factor(stride)) %>%
+  group_by(stride) %>%
+  group_modify(~{variogram(Y1~1, location = ~s1+s2, data = .x)}) %>%
+  ggplot(aes(x=dist, y=gamma, col = stride))+
+  geom_line()+
+  geom_point()+
+  labs(y="Semivariance")
+```
+
+I have certain expectations of the variograms:
+
+1. when stride >= 4, the semivariogram should look similar and flat, since the adjacent pixels are generated from non-overlapping blocks
+2. when stride < 4, the semivariogram should be incresasing, since adjacent pixels are generated from over lapping blocks, while pixels far away are not
+2. when stride < 4, the starting semivariogram should be higher for larger stride size, since that means less overlap. But eventually they should reach the same level. 
+
+We do see that if we do the simulation repeatedly. Please note that the range of y axis is a small, so any tiny difference would appear huge in this figure. 
 
 ## Some notes
 
@@ -358,6 +280,7 @@ ma_wt_type %>%
 - But alternatively, if we only interested in local correlation, we wouldn't need semivariograms! We only need the estimates filter weights for that. 
 2. If the goal is only to simulate data that looks like the real data, it might be better to use standard image simulation model and learn the weight matrix
 2. Block bootstrap: Hierarchical clustering
+
 
 # Bivariate correlation testing under null hypothesis
 
@@ -372,66 +295,12 @@ Y_{1i}(s_1, s_2, t) &=\epsilon_{1i}(s_1, s_2, t) \\
 Y_{2i}(s_1, s_2, t) &=\epsilon_{2i}(s_1, s_2, t) \\
 \end{aligned}$$
 
-
 - $(s_1, s_2)$ are spatial coordinates on a 32 by 32 2D image
 - $\epsilon_{i1}$, $\epsilon_{i2}$ are moving average of a white noise field.    
 - In fact, in this case there is no point generating across time, because all time points have the same distribution. It would just be like repeating the same thing a few more times. That leaves us room for filter size and weight. 
 
-
-```{r set-up1}
-# set up space-time grid
-# generate a 2D image of 32 by 32
-df_subj <- expand_grid(ksize = ksize_vec, id=1:Nf, s2=1:nS, s1 = 1:nS)
-```
-
-
-```{r gen_data1, results='hide', cache=TRUE}
-df_subj$Y1 <- df_subj$Y2 <- NA
-
-# generate individual scores
-# true_xi <- matrix(rnorm(2*N, 0, 1.5), nrow = N, ncol = 2)
-# true_zeta <- matrix(rnorm(2*N, 0, 1.5), nrow = N, ncol = 2)
-
-# generate outcomes
-pb <- txtProgressBar(min=0, max=Nf, style = 3)
-
-t1 <- Sys.time()
-for(i in 1:Nf){ # fix a subject
-  
-  for(k in seq_along(ksize_vec)){ # fix a time point
-
-    # random effect of this subject at this time
-    # dist_it <- df_subj$dist[df_subj$id==i & df_subj$t==this_t]
-
-    # generate Y1
-    ## a moving average error
-    Y1 <- MA_rand_field(ksize_vec[k], nS)
-    # y1_it <- true_xi[i,1]*dist_it+true_xi[i,2]*this_t + as.vector(ma_err1)
-    df_subj$Y1[df_subj$ksize==ksize_vec[k] & df_subj$id==i] <- as.vector(Y1)
-    
-    # generate Y2
-    ## a moving average error
-    Y2 <- MA_rand_field(ksize_vec[k], nS)
-    # y2_it <- true_zeta[i,1]*dist_it+true_zeta[i,2]*this_t + as.vector(ma_err2)
-    df_subj$Y2[df_subj$ksize==ksize_vec[k] & df_subj$id==i] <- as.vector(Y2)
-   }
-
-setTxtProgressBar(pb, i)
-}
-t2 <- Sys.time()
-
-close(pb)
-
-# save data
-# save(df_subj, file = here("Data/sim_data_ksize.RData"))
-```
-
-
-It took `r round(t2-t1, 3)` minutes to generate data for `r N` subjects. Below we show an example of one subject. 
-
-
 ```{r example_data1, fig.height=6, fig.width=15}
-df_subj %>% 
+df_ksize %>% 
   filter(id==15) %>%
   pivot_longer(starts_with("Y")) %>%
   ggplot()+
@@ -447,8 +316,8 @@ We fit a simple linear model across space conditioning on each subject and time:
 $$Y_{2i}(\mathbf{s}|t) = \beta_{it0}+\beta_{it1}Y_{1i}(\mathbf{s}|t)+\epsilon_i(\mathbf{s}|t)$$
 
 ```{r, fig.height=12, fig.width=15}
-df_subj %>% 
-  filter(id %in% sample(1:Nf, size = 4)) %>%
+df_ksize %>% 
+  filter(id %in% 1:4) %>%
   ggplot(aes(x=Y1, y=Y2))+
   geom_point(size = 0.2)+
   geom_smooth(formula = 'y~x', method = "lm")+
@@ -460,12 +329,11 @@ df_subj %>%
 
 
 ```{r}
-lm_err <- data.frame(ksize = ksize_vec)
-N_vec <- c(100, 200, 500, 1000)
+lm_err <- data.frame(ksize = unique(df_ksize$ksize))
 
 for(n in seq_along(N_vec)){
   
-  err_n <- df_subj %>%
+  err_n <- df_ksize %>%
     filter(id <= N_vec[n]) %>%
     group_by(id, ksize) %>%
     group_modify(~{
@@ -509,78 +377,13 @@ If we set $p_b = 1/B$, then
 $$E(N_{new}) = E(\sum_{b=1}^Bn_b^{new}) = \sum_{b=1}^BE(n_b^{new})=\sum_{b=1}^B\sum_{b=1}^Bn_bp_b = \sum_{b=1}^B\sum_{b=1}^B n_b\frac{1}{B}=\sum_{b=1}^B\frac{N}{B} = N $$
 
 
-```{r boot_set_up1, results='hide'}
-df_subj_k <- df_subj %>% filter(id %in% 1:N)
-# ksize_vec <- c(1, 3, 5)
-# containers
-# bootstrap image size
-img_size <- array(NA, dim = c(length(ksize_vec), max_size, N, M))
-slope_est <- array(NA, dim = c(length(ksize_vec), max_size, N, M))
-# pval <- array(NA, dim = c(length(ksize_vec), length(bsize), N, M))
-# dim(img_size)
-```
-
-
-```{r block_boot1, cache=TRUE, results='hide'}
-# bootstrap
-pb <- txtProgressBar(0, length(ksize_vec)*max_size*N, style = 3)
-ct <- 0
-t1 <- Sys.time()
-
-for(k in seq_along(ksize_vec)){ # filter size for data generation
-  
-  for(b in 1:max_size){ # block size for bootstrap
-    
-    for(i in 1:N){ # for each subject
-      
-      # A matrix of observed outcome
-      this_df <- df_subj_k %>% filter(ksize==ksize_vec[k] & id == i)
-      Y_mat <- matrix(this_df$Y2, nS, nS)
-      
-      # divide the matrix into blocks
-      rblock <- (row(Y_mat)-1)%/%b+1
-      cblock <- (col(Y_mat)-1)%/%b+1
-      block_id_mat <- (rblock-1)*max(cblock) + cblock
-      nblock <- max(block_id_mat)
-      
-      # sample blocks
-      # sample the same number of blocks as the original image
-      this_df$block_id <- as.vector(block_id_mat)
-      block_list <- split(this_df, f = this_df$block_id)
-      
-      for(m in 1:M){
-        boot_block <- sample(1:nblock, size = nblock, replace = T)
-        boot_df <- bind_rows(block_list[boot_block])
-        img_size[k, b, i, m] <- nrow(boot_df)
-        
-        # fit model
-        boot_lm <-  summary(lm(Y2~Y1, data = boot_df))$coefficients
-        slope_est[k, b, i, m] <- boot_lm["Y1", "Estimate"]
-        
-      }
-      
-      ct <- ct+1
-      setTxtProgressBar(pb, ct)
-      
-    }
-  }
-}
-t2 <- Sys.time()
-```
-
-
-- Time spent on the bootstrap process: `r t2-t1`
-- Expected image size: `r mean(img_size)`
-
-
 ```{r type1err1}
-# check expectation of image size
-# apply(img_size[ , , , ], MARGIN = 1:3, FUN = mean)
-# mean(img_size)
+load(here("Data/block_boot_H0_ksize.RData"))
+ksize_vec <- unique(df_ksize$ksize)
 
 # calculate Type I error
-lqt_mat <- apply(slope_est[ , , , ], MARGIN = 1:3, FUN =quantile, probs = 0.025)
-uqt_mat <- apply(slope_est[ , , , ], MARGIN = 1:3, FUN =quantile, probs = 0.975)
+lqt_mat <- apply(slope_est_ksize[ , , , ], MARGIN = 1:3, FUN =quantile, probs = 0.025)
+uqt_mat <- apply(slope_est_ksize[ , , , ], MARGIN = 1:3, FUN =quantile, probs = 0.975)
 reject_mat <- 0 < lqt_mat | uqt_mat < 0
 typeIerror <- apply(reject_mat, 1:2, mean)
 typeIerror <- data.frame(ksize = ksize_vec, typeIerror)
@@ -601,7 +404,7 @@ Below I show the mean and standard deviation of bootstrap slope estimates for al
 
 ```{r slope_dist1, fig.height=10, fig.width=10}
 # mean slope estimates
-slope_mean1 <- apply(slope_est, MARGIN = 1:3, FUN = mean)
+slope_mean1 <- apply(slope_est_ksize, MARGIN = 1:3, FUN = mean)
 array(aperm(slope_mean1, perm = c(1, 3, 2)), 
       dim =c(N*length(ksize_vec), max_size)) %>% 
   data.frame() %>%
@@ -622,7 +425,7 @@ array(aperm(slope_mean1, perm = c(1, 3, 2)),
 
 ```{r, fig.height=10, fig.width=10}
 # mean slope estimates
-slope_sd1 <- apply(slope_est, MARGIN = 1:3, FUN = sd)
+slope_sd1 <- apply(slope_est_ksize, MARGIN = 1:3, FUN = sd)
 array(aperm(slope_sd1, perm = c(1, 3, 2)), 
       dim =c(N*length(ksize_vec), max_size)) %>% 
   data.frame() %>%
@@ -643,7 +446,7 @@ array(aperm(slope_sd1, perm = c(1, 3, 2)),
 Below I also showed an example of the bootstrap slope estimates of one subject.
 
 ```{r, fig.height=10, fig.width=10}
-array(slope_est[,,15,], dim = c(length(ksize_vec)*max_size, M)) %>% 
+array(slope_est_ksize[,,15,], dim = c(length(ksize_vec)*max_size, M)) %>% 
   data.frame() %>%
   mutate(ksize = rep(ksize_vec, max_size), 
          bsize = rep(1:max_size, each = length(ksize_vec)),
@@ -663,56 +466,14 @@ Here the two parameters of interest are the weight matrix (in data generation pr
 
 Just like before, I will generate data for 1000 subject, but only use 100 for the block bootstrap portion. The filter size for generating data is fixed at 5. 
 
-```{r set-up2}
-# set up space-time grid
-# generate a 2D image of 32 by 32
-# nS <- 32
-# Nf
-df_subj2 <- expand_grid(alpha = alpha_vec, id=1:Nf, s2=1:nS, s1 = 1:nS)
-# alpha_vec
-# wt_dist
-```
-
-
-```{r gen_data2, results='hide', cache=TRUE}
-df_subj2$Y1 <- df_subj2$Y2 <- NA
-
-
-# generate outcomes
-pb <- txtProgressBar(min=0, max=Nf, style = 3)
-
-t1 <- Sys.time()
-for(i in 1:Nf){ # fix a subject
-  
-  for(k in seq_along(alpha_vec)){ # fix a weight matrix
-
-    # generate Y1
-    ## a moving average error
-    Y1 <- MWA_rand_field(kf = 5, ki = 32, wt = wt_dist[,,k])
-    df_subj2$Y1[df_subj2$alpha==alpha_vec[k] & df_subj2$id==i] <- as.vector(Y1)
-    
-    # generate Y2
-    ## a moving average error
-    Y2 <- MWA_rand_field(kf = 5, ki = 32, wt = wt_dist[,,k])
-    # y2_it <- true_zeta[i,1]*dist_it+true_zeta[i,2]*this_t + as.vector(ma_err2)
-    df_subj2$Y2[df_subj2$alpha==alpha_vec[k] & df_subj$id==i] <- as.vector(Y2)
-   }
-
-setTxtProgressBar(pb, i)
-}
-t2 <- Sys.time()
-
-close(pb)
-
-# save data
-# save(df_subj2, file = here("Data/sim_data_wt.RData"))
-```
-
 
 ```{r example_data2, fig.height=6, fig.width=15}
-df_subj2 %>% 
+load(here("Data/block_boot_H0_expwt.RData"))
+
+
+df_expwt %>% 
   filter(id==15) %>%
-  mutate(alpha=fct_rev(as.factor(alpha))) %>%
+  mutate(alpha=as.factor(alpha)) %>%
   pivot_longer(starts_with("Y")) %>%
   ggplot()+
   geom_tile(aes(x=s1, y=s2, fill = value))+
@@ -724,9 +485,9 @@ df_subj2 %>%
 ### Simple linear regression
 
 ```{r, fig.height=12, fig.width=15}
-df_subj2 %>% 
-  filter(id %in% sample(1:N, size = 4)) %>%
-  mutate(alpha=fct_rev(as.factor(alpha))) %>%
+df_expwt %>% 
+  filter(id %in% 1:4) %>%
+  mutate(alpha=as.factor(alpha)) %>%
   ggplot(aes(x=Y1, y=Y2))+
   geom_point(size = 0.2)+
   geom_smooth(formula = 'y~x', method = "lm")+
@@ -737,12 +498,13 @@ df_subj2 %>%
 
 
 ```{r lm2}
+alpha_vec <- unique(df_expwt$alpha)
 lm_err2 <- data.frame(alpha = alpha_vec)
 # N_vec <- c(100, 200, 500, 1000)
 
 for(n in seq_along(N_vec)){
   
-  err_n <- df_subj2 %>%
+  err_n <- df_expwt %>%
     filter(id <= N_vec[n]) %>%
     group_by(id, alpha) %>%
     group_modify(~{
@@ -760,7 +522,7 @@ for(n in seq_along(N_vec)){
 
 lm_err2 %>%
   # rename("Alpha" = "ksize") %>%
-  arrange(desc(alpha)) %>%
+  # arrange(desc(alpha)) %>%
   mutate(alpha=fct_rev(as.factor(alpha))) %>%
   kable(table.attr = "style=\"color:black;\"") %>%
   kable_styling(full_width = F) %>%
@@ -772,80 +534,14 @@ lm_err2 %>%
 
 ### Block bootstrap
 
-We will follow the same set up as Section 2.2. 
-
-```{r boot_set_up2, results='hide'}
-# M <- 1000 # number of boostraps
-# N <- 100 # sample size
-df_subj_wt <- df_subj2 %>% filter(id %in% 1:N)
-# max_size
-# containers
-# bootstrap image size
-img_size2 <- array(NA, dim = c(length(alpha_vec), max_size, N, M))
-slope_est2 <- array(NA, dim = c(length(alpha_vec), max_size, N, M))
-```
-
-
-```{r block_boot2, cache=TRUE, results='hide'}
-# bootstrap
-pb <- txtProgressBar(0, length(alpha_vec)*max_size*N, style = 3)
-ct <- 0
-t1 <- Sys.time()
-
-for(k in seq_along(alpha_vec)){ # filter size for data generation
-  
-  for(b in 1:max_size){ # block size for bootstrap
-    
-    for(i in 1:N){ # for each subject
-      
-      # A matrix of observed outcome
-      this_df <- df_subj_wt %>% filter(alpha==alpha_vec[k] & id == i)
-      Y_mat <- matrix(this_df$Y2, nS, nS)
-      
-      # divide the matrix into blocks
-      rblock <- (row(Y_mat)-1)%/%b+1
-      cblock <- (col(Y_mat)-1)%/%b+1
-      block_id_mat <- (rblock-1)*max(cblock) + cblock
-      nblock <- max(block_id_mat)
-      
-      # sample blocks
-      # sample the same number of blocks as the original image
-      this_df$block_id <- as.vector(block_id_mat)
-      block_list <- split(this_df, f = this_df$block_id)
-      
-      for(m in 1:M){
-        boot_block <- sample(1:nblock, size = nblock, replace = T)
-        boot_df <- bind_rows(block_list[boot_block])
-        img_size2[k, b, i, m] <- nrow(boot_df)
-        
-        # fit model
-        boot_lm <-  summary(lm(Y2~Y1, data = boot_df))$coefficients
-        slope_est2[k, b, i, m] <- boot_lm["Y1", "Estimate"]
-        
-      }
-      
-      ct <- ct+1
-      setTxtProgressBar(pb, ct)
-      
-    }
-  }
-}
-t2 <- Sys.time()
-```
-
-
-- Time spent on the bootstrap process: `r t2-t1`
-- Expected image size: `r mean(img_size2)`
 
 
 ```{r}
-# check expectation of image size
-# apply(img_size[ , , , ], MARGIN = 1:3, FUN = mean)
-# mean(img_size)
+load(here("Data/block_boot_H0_expwt.RData"))
 
 # calculate Type I error
-lqt_mat2 <- apply(slope_est2[ , , , ], MARGIN = 1:3, FUN =quantile, probs = 0.025)
-uqt_mat2 <- apply(slope_est2[ , , , ], MARGIN = 1:3, FUN =quantile, probs = 0.975)
+lqt_mat2 <- apply(slope_est_expwt[ , , , ], MARGIN = 1:3, FUN =quantile, probs = 0.025)
+uqt_mat2 <- apply(slope_est_expwt[ , , , ], MARGIN = 1:3, FUN =quantile, probs = 0.975)
 reject_mat2 <- 0 < lqt_mat2 | uqt_mat2 < 0
 typeIerror2 <- apply(reject_mat2, 1:2, mean)
 typeIerror2 <- data.frame(alpha = alpha_vec, typeIerror2)
@@ -866,7 +562,7 @@ typeIerror2 %>% pivot_longer(starts_with("X")) %>%
 
 ```{r slope_dist2, fig.height=10, fig.width=10}
 # mean slope estimates
-slope_mean2 <- apply(slope_est2, MARGIN = 1:3, FUN = mean)
+slope_mean2 <- apply(slope_est_expwt, MARGIN = 1:3, FUN = mean)
 array(aperm(slope_mean2, perm = c(1, 3, 2)), 
       dim =c(N*length(alpha_vec), max_size)) %>% 
   data.frame() %>%
@@ -888,7 +584,7 @@ array(aperm(slope_mean2, perm = c(1, 3, 2)),
 
 ```{r, fig.height=10, fig.width=10}
 # mean slope estimates
-slope_sd2 <- apply(slope_est2, MARGIN = 1:3, FUN = sd)
+slope_sd2 <- apply(slope_est_expwt, MARGIN = 1:3, FUN = sd)
 array(aperm(slope_sd2, perm = c(1, 3, 2)), 
       dim =c(N*length(alpha_vec), max_size)) %>% 
   data.frame() %>%
@@ -909,7 +605,7 @@ array(aperm(slope_sd2, perm = c(1, 3, 2)),
 
 
 ```{r, fig.height=10, fig.width=10}
-array(slope_est2[,,15,], dim = c(length(alpha_vec)*max_size, M)) %>% 
+array(slope_est_expwt[,,15,], dim = c(length(alpha_vec)*max_size, M)) %>% 
   data.frame() %>%
   mutate(alpha = rep(alpha_vec, max_size), 
          bsize = rep(1:max_size, each = length(alpha_vec)),
@@ -930,9 +626,9 @@ array(slope_est2[,,15,], dim = c(length(alpha_vec)*max_size, M)) %>%
 In this section, filter size is fixed at 5. Data is generated from different functional shape of weight function (wrt) distance
 
 ```{r data_example_wt_type, fig.height=6, fig.width=15}
-df_subj3$wt_type <- factor(df_subj3$wt_type, levels = c("wt_inc", "wt_dec", "wt_u", "wt_sin", "wt_cos"))
-df_subj3 %>% 
+df_wt_type %>% 
   filter(id==15) %>%
+  mutate(wt_type = factor(wt_type, levels = c("wt_inc","wt_dec","wt_u","wt_sin","wt_cos"))) %>%
   pivot_longer(starts_with("Y")) %>%
   ggplot()+
   geom_tile(aes(x=s1, y=s2, fill = value))+
@@ -943,9 +639,9 @@ df_subj3 %>%
 ### Simple linear regression
 
 ```{r, fig.height=12, fig.width=15}
-df_subj3 %>% 
-  filter(id %in% sample(1:N, size = 4)) %>%
-  # mutate(alpha=fct_rev(as.factor(alpha))) %>%
+df_wt_type %>% 
+  filter(id %in% 1:4) %>%
+  mutate(wt_type = factor(wt_type, levels = c("wt_inc","wt_dec","wt_u","wt_sin","wt_cos"))) %>%
   ggplot(aes(x=Y1, y=Y2))+
   geom_point(size = 0.2)+
   geom_smooth(formula = 'y~x', method = "lm")+
@@ -956,12 +652,12 @@ df_subj3 %>%
 
 
 ```{r lm3}
-lm_err3 <- data.frame(wt_type=unique(df_subj3$wt_type))
+lm_err3 <- data.frame(wt_type=unique(df_wt_type$wt_type))
 # N_vec <- c(100, 200, 500, 1000)
 
 for(n in seq_along(N_vec)){
   
-  err_n <- df_subj3 %>%
+  err_n <- df_wt_type %>%
     filter(id <= N_vec[n]) %>%
     group_by(id, wt_type) %>%
     group_modify(~{
@@ -988,6 +684,32 @@ lm_err3 %>%
   kable_styling(full_width = F) %>%
   add_header_above(c(" " = 1, "Type I error" = "4"))
 
+```
+
+
+### Block bootstrap
+
+```{r}
+load(here("Data/block_boot_H0_expwt.RData"))
+wt_type_vec <- unique(df_wt_type$wt_type)
+
+# calculate Type I error
+lqt_mat3 <- apply(slope_est_wt_type[ , , , ], MARGIN = 1:3, FUN =quantile, probs = 0.025)
+uqt_mat3 <- apply(slope_est_wt_type[ , , , ], MARGIN = 1:3, FUN =quantile, probs = 0.975)
+reject_mat3 <- 0 < lqt_mat3 | uqt_mat3 < 0
+typeIerror3 <- apply(reject_mat3, 1:2, mean)
+typeIerror3 <- data.frame(wt_type = wt_type_vec, typeIerror3)
+```
+
+```{r}
+typeIerror3 %>% pivot_longer(starts_with("X")) %>%
+  mutate(bsize = as.numeric(gsub("X", "", name))) %>%
+  ggplot()+
+  geom_line(aes(x=bsize, y=value, group=wt_type, col=wt_type))+
+  geom_point(aes(x=bsize, y=value, group=wt_type, col=wt_type))+
+  geom_hline(yintercept = 0.05, col = "black", linetype = "dashed")+
+  labs(x="Block size", y="Type I error", col = "Weight matrix")+
+  scale_x_continuous(breaks = 1:max_size)
 ```
 
 
