@@ -26,7 +26,7 @@ pb <- txtProgressBar(min=0, max=Nf, style = 3)
 t1 <- Sys.time()
 for(i in 1:Nf){ # fix a subject
   
-  for(k in seq_along(ksize_vec)){ # fix a time point
+  for(k in seq_along(ksize_vec)){ # fix a filter size
     
     # simple average: equal weight
     wt <- matrix(1, ksize_vec[k], ksize_vec[k])
@@ -49,7 +49,6 @@ t2 <- Sys.time()
 close(pb)
 
 t2-t1 # 7 minutes
-
 
 # save data
 save(df_ksize, file = here("Data/sim_H0_ksize.RData"))
