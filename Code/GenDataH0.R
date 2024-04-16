@@ -135,7 +135,14 @@ wt_type <- wt_type %>%
   mutate(wt_sin = sin(2*pi*dist/max(dist))) %>%
   mutate(wt_cos = cos(2*pi*dist/max(dist))) 
 
-lapply(wt_type %>% select(starts_with("wt_")), range)
+# scale so that they have the same baseline variation
+wt_type <- wt_type %>% mutate_at(vars(starts_with("wt_")),
+                                 function(x){x*5/sqrt(sum(x^2))}) 
+
+wt_type %>% summarise_at(vars(starts_with("wt_")),
+                         function(x){mean(x^2)})
+
+
 
 # generate data
 df_wt_type <- expand_grid(wt_type = wt_type_vec, id=1:Nf, s2=1:nS, s1 = 1:nS)
@@ -195,5 +202,73 @@ for(i in seq_along(stride_vec)){
 save(df_stride, file = here("Data/sim_H0_stride.RData"))
 
 
+##### Null hypothesis, decreasing weight #####
 
+# further look into the decreasing weight function
+# I am trying to figure out why the type I error this decreasing function 
+# is not going down to the same level as in the exponential weight case
+# since one is exp(-d) and the other is exp(-d^2), could it be the power? 
+
+# my speculation: the flatter the weight is, the harder it is to lower type I error
+
+# Euclidean distance
+wt_dec <- expand_grid(s1 = 1:5, s2 = 1:5)
+## Euclidean distance to center
+wt_dec$dist <- sqrt((wt_dec$s1-3)^2+(wt_dec$s2-3)^2)
+
+# weight
+wt_dec <- wt_dec %>%
+  mutate(exp_wt0.5 = exp(-sqrt(dist)),
+         exp_wt1 = exp(-dist),
+         exp_wt2 = exp(-dist^2),
+         exp_wt3 = exp(-dist^3))
+
+wt_dec %>% pivot_longer(starts_with("exp_wt")) %>% 
+  ggplot()+
+  geom_tile(aes(x=s1, y=s2, fill=value))+
+  facet_wrap(~name)
+
+# The higher the power, the more weight is put in center
+wt_dec_vec <- colnames(wt_dec)[4:7]
+
+# generate data
+df_wt_dec <- expand_grid(wt_dec = wt_dec_vec, id=1:Nf, s2=1:nS, s1 = 1:nS)
+df_wt_dec$Y1 <- df_wt_dec$Y2 <- NA
+
+pb <- txtProgressBar(min=0, max=Nf, style = 3)
+
+t1 <- Sys.time()
+for(i in 1:Nf){ # fix a subject
+  
+  for(k in seq_along(wt_dec_vec)){ # fix a type of weight
+    
+    # weight matrix
+    this_wt <- matrix(as_vector(wt_dec[, wt_dec_vec[k]]), 5, 5)
+    
+    # generate Y1
+    MAerr_mat1 <- MWA_rand_field(kf = 5, ki = 32, wt = this_wt)
+    df_wt_dec$Y1[df_wt_dec$id==i & df_wt_dec$wt_dec==wt_dec_vec[k]] <- as.vector(MAerr_mat1)
+    
+    # generate Y1
+    MAerr_mat2 <- MWA_rand_field(kf = 5, ki = 32, wt = this_wt)
+    df_wt_dec$Y2[df_wt_dec$id==i & df_wt_dec$wt_dec==wt_dec_vec[k]] <- as.vector(MAerr_mat2)
+  }
+  
+  setTxtProgressBar(pb, i)
+}
+t2 <- Sys.time()
+
+close(pb)
+
+t2-t1 # about 7 minutes
+
+# figure
+df_wt_dec %>% filter(id==1) %>%
+  ggplot(aes(x=s1, y=s2, fill= Y1))+
+  geom_tile()+
+  facet_wrap(~wt_dec)
+
+
+# save data
+save(df_wt_type, file = here("Data/sim_H0_wt_type.RData"))
 

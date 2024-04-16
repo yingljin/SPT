@@ -152,7 +152,12 @@ t2 <- Sys.time()
 
 close(pb)
 
-t2-t1 # 10 minutes
+t2-t1 # 9 minutes
+
+# variance
+df_wt_type_h1 %>% filter(id == 1) %>% 
+  group_by(wt_type) %>% 
+  summarize(var1 = var(Y1), var2 = var(Y2))
 
 # save data
 save(df_wt_type_h1, file = here("Data/sim_H1_wt_type.RData"))
