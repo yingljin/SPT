@@ -226,6 +226,9 @@ for(k in seq_along(wt_type_vec)){ # filter size for data generation
 }
 t2 <- Sys.time()
 
+
+close(pb)
+
 t2-t1 # 1.7 hours
 
 

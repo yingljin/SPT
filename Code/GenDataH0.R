@@ -30,6 +30,7 @@ for(i in 1:Nf){ # fix a subject
     
     # simple average: equal weight
     wt <- matrix(1, ksize_vec[k], ksize_vec[k])
+    wt <- wt*ksize_vec[k]^2/sqrt(sum(wt^2))
     
     # generate Y1
     ## a moving average error
@@ -48,7 +49,12 @@ t2 <- Sys.time()
 
 close(pb)
 
-t2-t1 # 7 minutes
+t2-t1 # 10  minutes
+
+# check variation
+df_ksize %>% filter(id==1) %>%
+  group_by(ksize) %>% 
+  summarise(var1 = var(Y1), var2 = var(Y2))
 
 # save data
 save(df_ksize, file = here("Data/sim_H0_ksize.RData"))
@@ -70,7 +76,7 @@ for(m in seq_along(alpha_vec)){
   }
   
   # normalization
-  wt_exp[,, m] <- wt_exp[,,m]*(5^2)/sum(wt_exp[,,m])
+  wt_exp[,, m] <- wt_exp[,,m]*(5^2)/sqrt(sum(wt_exp[,,m]^2))
 }
 
 # generate data 
@@ -106,7 +112,7 @@ t2 <- Sys.time()
 
 close(pb)
 
-t2-t1 # 7 minutes
+t2-t1 # 8 minutes
 
 # save data
 save(df_expwt, file = here("Data/sim_H0_expwt.RData"))
@@ -137,7 +143,7 @@ wt_type <- wt_type %>%
 
 # scale so that they have the same baseline variation
 wt_type <- wt_type %>% mutate_at(vars(starts_with("wt_")),
-                                 function(x){x*5/sqrt(sum(x^2))}) 
+                                 function(x){x*25/sqrt(sum(x^2))}) 
 
 wt_type %>% summarise_at(vars(starts_with("wt_")),
                          function(x){mean(x^2)})
@@ -173,7 +179,7 @@ t2 <- Sys.time()
 
 close(pb)
 
-t2-t1 # about 7 minutes
+t2-t1 # about 8 minutes
 
 # save data
 save(df_wt_type, file = here("Data/sim_H0_wt_type.RData"))
