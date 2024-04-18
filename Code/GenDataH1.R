@@ -35,6 +35,7 @@ for(i in 1:Nf){ # fix a subject
     
     # simple average: equal weight
     wt <- matrix(1, ksize_vec[k], ksize_vec[k])
+    wt <- wt*ksize_vec[k]^2/sqrt(sum(wt))
     
     # generate Y1
     ## a moving average error
@@ -55,7 +56,12 @@ t2 <- Sys.time()
 
 close(pb)
 
-t2-t1 # 6 minutes
+t2-t1 # 9 minutes
+
+
+# check variance
+df_ksize_h1 %>% filter(id==1) %>% group_by(ksize) %>% summarize(var1 = var(Y1), var2 = var(Y2))
+
 
 # save data
 save(df_ksize_h1, file = here("Data/sim_H1_ksize.RData"))
@@ -64,11 +70,15 @@ save(df_ksize_h1, file = here("Data/sim_H1_ksize.RData"))
 
 # load weight matrix
 load(here("Data/wt_exp_mat.RData"))
+# weights should be scaled already
+apply(wt_exp, 3, function(x){sum(x^2)/25/25})
+
 
 alpha_vec <- c(0, 0.5, 1, 2.5, 5) # exponential weight parameters
 
 df_expwt_h1 <- expand_grid(alpha=alpha_vec, id=1:Nf, s2=1:nS, s1 = 1:nS)
-df_expwt_h1$Y1 <- df_expwt_h1$Y2 <- NA
+df_expwt_h1$Y1 <- df_expwt_h1$Y2 <- NA 
+
 
 # generate individual scores
 # true_xi <- matrix(rnorm(2*N, 0, 1.5), nrow = N, ncol = 2)
@@ -104,7 +114,11 @@ t2 <- Sys.time()
 
 close(pb)
 
-t2-t1 # 7 minutes
+t2-t1 # 8 minutes
+
+# check variance
+df_expwt_h1 %>% filter(id==1) %>% group_by(alpha) %>% summarize(var1 = var(Y1), var2 = var(Y2))
+
 
 # save data
 save(df_expwt_h1, file = here("Data/sim_H1_expwt.RData"))
@@ -113,6 +127,10 @@ save(df_expwt_h1, file = here("Data/sim_H1_expwt.RData"))
 
 # load weight matrix
 load(here("Data/wt_type.RData"))
+
+# weights are scaled
+wt_type %>% 
+  mutate_at(vars(starts_with("wt_")), function(x){sum(x^2/25/25)})
 
 # weight type
 wt_type_vec <- c("wt_inc", "wt_dec", "wt_u", "wt_sin", "wt_cos")
@@ -152,7 +170,7 @@ t2 <- Sys.time()
 
 close(pb)
 
-t2-t1 # 9 minutes
+t2-t1 # 8 minutes
 
 # variance
 df_wt_type_h1 %>% filter(id == 1) %>% 

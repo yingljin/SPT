@@ -44,6 +44,7 @@ for(k in seq_along(ksize_vec)){ # filter size for data generation
 }
 t2 <- Sys.time()
 
+t2-t1 # 1.7 hours
 
 # save data
 slope_est_ksize <- slope_est
@@ -79,7 +80,7 @@ for(k in seq_along(alpha_vec)){ # filter size for data generation
 t2 <- Sys.time()
 close(pb)
 
-t2-t1 # almost 2 hours
+t2-t1 # 1.7 hours
 
 
 # save data
@@ -115,7 +116,7 @@ for(k in seq_along(wt_type_vec)){ # filter size for data generation
 t2 <- Sys.time()
 close(pb)
 
-t2-t1 # almost 2 hours
+t2-t1 # almost 1.7 hours
 
 
 # save data

@@ -298,6 +298,7 @@ Simple variance of generated data:
 df_wt_type %>% 
   group_by(wt_type, id) %>% 
   summarise(var_Y1=var(Y1), .groups = "keep") %>%
+  mutate(wt_type = factor(wt_type, levels = c("wt_inc", "wt_dec", "wt_u", "wt_sin", "wt_cos"))) %>%
   ggplot(aes(x=wt_type, y = var_Y1, group=wt_type))+
   geom_boxplot()+
   geom_hline(yintercept = 1, col = "red")+
@@ -410,6 +411,8 @@ df_ksize %>%
   labs(title = "Perason correlation of four subject")
 ```
 
+When greater spatial correlation is induced by larger filter, more significant correlation was (falsely) detected. 
+
 ### Simple linear regression
 
 We fit a simple linear model across space conditioning on each subject and time:
@@ -491,6 +494,8 @@ typeIerror %>% pivot_longer(starts_with("X")) %>%
   labs(x="Block size", y="Type I error", col = "Filter size")+
   scale_x_continuous(breaks = 1:max_size)
 ```
+
+After scaling, the endpoint of type I error is not as different as before across filter sizes. But the trend stays the same. Larger filter size led to higher type I error. 
 
 Below I show the mean and standard deviation of bootstrap slope estimates for all 100 subjects (each point represents a subject).
 
