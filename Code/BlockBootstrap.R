@@ -153,8 +153,9 @@ for(k in seq_along(ksize_vec)){ # filter size for data generation
   }
 }
 t2 <- Sys.time()
+close(pb)
 
-t2-t1 # 1.7 hours
+t2-t1 # 1.9 hours
 
 
 save(slope_est_ksize_h1, file = here("Data/block_boot_H1_ksize.RData"))
@@ -191,7 +192,7 @@ for(k in seq_along(alpha_vec)){ # filter size for data generation
 t2 <- Sys.time()
 
 t2-t1 # 1.8 hours
-
+close(pb)
 
 save(slope_est_expwt_h1, file = here("Data/block_boot_H1_expwt.RData"))
 
@@ -230,7 +231,7 @@ t2 <- Sys.time()
 
 close(pb)
 
-t2-t1 # 1.7 hours
+t2-t1 # 1.9 hours
 
 
 save(slope_est_wttype_h1, file = here("Data/block_boot_H1_wt_type.RData"))

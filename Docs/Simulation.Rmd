@@ -1362,12 +1362,30 @@ My way is to create a 2D matrix that I am sure that can fit all the blocks, and 
 # subset subject 15
 df_id15 <- df_ksize %>% filter(id == 15)
 
-# containers
-res_list <- list()
+# # simple linear regression
+# df_id15 %>% 
+#   group_by(ksize) %>%
+#   group_modify(~{this_fit <- lm(Y2~Y1, data = .x)
+#                  data.frame(res = this_fit$residuals,
+#                             pred = this_fit$fitted.values)}) %>%
+#   ggplot(aes(x=pred, y=res))+
+#   geom_point(size = 0.2)+
+#   geom_smooth(formula = y~x)+
+#   facet_wrap(~ksize)
+# 
+# try_fit <- lm(Y2~Y1, data = df_id15)
+# try_fit$fitted.values
+# 
+# lapply(lm_list, function(x){x$residuals}) %>%
+#   bind_rows()
 ```
+
+Out of curiosity, I would like to look at the distribution of residuals in the presense of spatial correlation
 
 
 ```{r bootstrap_residuals}
+# containers
+res_list <- list()
 for(k in seq_along(ksize_vec)){ # filter size for data generation
   
   res_list[[k]] <- list()
