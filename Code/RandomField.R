@@ -1,6 +1,6 @@
 # This script saves function for a 2D moving-average square filter of white noise
 
-##### Simple average #####
+##### Weighted average #####
 
 # kf: filter size (odd number)
 # ki: image size

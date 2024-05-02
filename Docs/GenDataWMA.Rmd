@@ -1,0 +1,250 @@
+---
+title: "Generate 2D Spatially Correlated Data Using Moving Weighted Average"
+author: "Ying Jin"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    self_contained: true
+    number_sections: true
+    code_folding: show
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    font: 12pt
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+set.seed(328)
+
+library(mgcv)
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+library(mvtnorm)
+library(ggpubr)
+library(here)
+library(gstat)
+library(sp)
+library(magick)
+library(arsenal)
+```
+
+This documents explain in details how I generated data using a moving weighted average (MWA) field. 
+
+First, an overview of the function I wrote:
+
+```{r}
+
+# kf: filter size (odd number)
+# ki: image size
+# wt: a weight matrix. It does not to be scaled to sum to 1
+
+MWA_rand_field <- function(kf, ki, wt){
+  
+  # generate a white noise image
+  # notice that this image is larger than the target image
+  # equivalent to boarders being padded with white noise 
+  kz <- ki+2*(kf%/%2) # size of the white noise 
+  Zmat <- matrix(rnorm(kz^2, 0, 1), kz, kz)
+  
+  # moving average
+  ma_mat <- matrix(NA, ki, ki)
+  for(i in 1:ki){
+    for(j in 1:ki){ 
+      # weighted
+      ma_mat[i, j] <- mean(Zmat[i:(i+2*(kf%/%2)), j:(j+2*(kf%/%2))]*wt)
+      
+    }
+  }
+  
+  return(ma_mat)
+  
+}
+
+```
+
+
+Below I'll explain the function step-by-step. 
+
+Some notations:
+
+- $K_f$: filter size
+- $K_i$: image size
+- $K_z$: size of white noise filed
+
+1. Generate the 2D white noise field.
+
+When using a moving average filter, we will need to pad the boarders. Therefore, the white noise field filters are applied on will be larger than the size of generated image. If we use as less padding as possible, we would need to pad $K_f//2$ rows or columns next to each boarder. So the original image size would be:
+
+$K_z = 2(K_f//2)+K_i$
+
+For example, if we'd like to generate a 32 by 32 image using a filter size of 5, the white noise field needs to be of size 36. 
+
+Let's generate such a white noise filed: 
+
+```{r}
+# dimensions:
+ki <- 32
+kf <- 5
+
+# size of the white noise field
+kz <- ki+2*(kf%/%2)
+
+# generate the white noise
+Zmat <- matrix(rnorm(kz^2, 0, 1), kz, kz)
+```
+
+
+```{r, class.source='fold-hide'}
+# heatmap
+Zmat %>% data.frame() %>%
+  mutate(s1 = 1:kz, .before = 1) %>%
+  pivot_longer(starts_with("X")) %>%
+  mutate(s2 = as.numeric(gsub("X", "", name))) %>%
+  ggplot(aes(x=s1, y=s2, fill=value))+
+  geom_tile()+
+  labs(title = "A 36 by 36 white noise field")
+
+# semivariogram
+Zmat %>% data.frame() %>%
+  mutate(s1 = 1:kz, .before = 1) %>%
+  pivot_longer(starts_with("X")) %>%
+  mutate(s2 = as.numeric(gsub("X", "", name))) %>%
+  variogram(value~1, location = ~s1+s2, data = .) %>%
+  ggplot()+
+  geom_line(aes(x=dist, y=gamma))+
+  geom_point(aes(x=dist, y=gamma))+
+  geom_hline(yintercept = 1, linetype = "dashed")+
+  labs(y="Sample variagram")
+```
+
+2. Apply moving weighted average filter
+
+Next, we apply the MWA filter to the white noise field generated above. Note that here a "weight filter" $W$ is needed. Previous, we have used only non-negative weights and the weightes are scaled to sum to one. However, we later relaxed the requirements such as negative weights are allowed. The generated pixel is the average of weighted pixels around it, as follows:
+
+$$X_{ij} = \frac{\sum_{m=i}^{i+k_f-1}\sum_{n=j}^{j+k_f-1} Z_{mn}W_{m-i+1, n-j+1}}{k_f^2}, \hspace{0.5cm}i,j=1,...,k_i$$
+Here $i,j$ is the pixel index on the generated image. 
+
+I use two for-loops to generate the image for now, even thought faster ways exist. It just help me keep track of the process and make adjustments. 
+
+Additionally, the variance of generated pixel $X_{ij}$ would change depending on the weight matrix used. We could control that by scaling the weight so that the variance of generated pixel is 1. Below is how it is down, with a slight abuse of notation: here $X$ denotes just any pixel. $i,j$ is no longer pixel index in the **generated image**, but within the **filter**.  
+
+Let's use $w_{ij}$ for unscaled wights and $\delta_{ij}$ for scaled weights: 
+
+$$Var(X)=Var(\frac{\sum_{i,j=1}^{k_f}\delta_{ij}{Z_{ij}}}{k_f^2})=\frac{\sum_{i,j=1}^{k_f} \delta_{ij}^2Var(Z_{ij})}{k_f^4} = \frac{\sum_{i,j=1}^{k_f}\delta_{ij}^2}{k_f^4}=1$$
+$$\sum_{i,j=1}^{k_f}\delta_{ij}^2=k_f^4=k_f^4 \frac{\sum_{i,j=1}^{k_f}w_{ij}^2}{\sum_{i,j=1}^{k_f}w_{ij}^2}=\sum_{i,j=1}^{k_f}\frac{k_f^4w_{ij}^2}{\sum_{i,j=1}^{k_f}w_{ij}^2}$$
+
+If we try to keep the sign unchanged from unscaled to scaled weight, we get: 
+
+$$\delta_{ij} =\frac{k_f^2w_{ij}}{\sqrt{\sum_{i,j=1}^{k_f} w_{ij}^2}}$$
+
+Let's try a few different weights under the same filter size $k_f=5$, also so on the same 36-by-36 white noise field we've created before. 
+
+- Equal wight: $w_{ij}=1$ 
+- Exponential weight, which decrease from center to boarder: $w_{ij} = exp(-d_{ij}^2)$
+- Increasing weight: $w_{ij} = exp(d_{ij})$
+- Trigonometric function: $w_{ij} = cos(2\pi d_{ij}/max(d_{ij}))$
+
+Across all functions, $d_{ij}$ is the Euclidean distance between the pixel in the filter and the center of the filter. 
+
+```{r}
+# calculate weight
+wt_type_vec <- c("wt_eq", "wt_exp", "wt_inc", "wt_cos")
+
+wt_type <- expand_grid(s1 = 1:5, s2 = 1:5)
+
+## Euclidean distance to center
+wt_type$dist <- sqrt((wt_type$s1-3)^2+(wt_type$s2-3)^2)
+# range(wt_type$dist)
+# exp(2.83)
+
+# what if weight is a reverse U shape function wrt distance? 
+wt_type <- wt_type %>% 
+  mutate(wt_eq = 1) %>% 
+  mutate(wt_exp = exp(-dist^2)) %>% 
+  mutate(wt_inc = exp(dist)) %>% 
+  mutate(wt_cos = cos(2*pi*dist/max(dist))) 
+
+# scale
+wt_type <- wt_type %>%
+  mutate_at(vars(starts_with("wt_")), function(x){x*kf^2/sqrt(sum(x^2))})
+# wt_type %>% mutate_at(vars(starts_with("wt_")), function(x){sum(x^2)})
+```
+
+```{r class.source = 'fold-hide'}
+wt_type %>% pivot_longer(starts_with("wt_")) %>% 
+  ggplot(aes(x=s1, y=s2, fill=value))+
+  geom_tile()+
+  facet_wrap(~name)+
+  labs(title = "Weight filter")
+
+wt_type %>% pivot_longer(starts_with("wt_")) %>% 
+  ggplot(aes(x=dist, y=value))+
+  geom_line()+
+  geom_point()+
+  facet_wrap(~name)+
+  labs(title = "Weight function", x = "distance", y="weight")
+```
+
+```{r}
+# apply moving weighted average filter
+
+## set up containers
+df_img <- expand_grid(wt_type = wt_type_vec, s1 = 1:ki, s2=1:ki)
+df_img$Y <- NA
+gen_time <- rep(NA, length(wt_type_vec))
+
+
+## generation
+for(k in seq_along(wt_type_vec)){ # for each weight filter
+  
+  t1 <- Sys.time()
+  # weight filter
+  this_wt <- matrix(as_vector(wt_type[, wt_type_vec[k]]), 5, 5, byrow = T)
+
+  Y_mat <- matrix(NA, ki, ki) ## container
+  for(i in 1:ki){
+    for(j in 1:ki){ 
+      # weighted
+      Y_mat[i, j] <- mean(Zmat[i:(i+2*(kf%/%2)), j:(j+2*(kf%/%2))]*this_wt)
+      
+    }
+  }
+  df_img[df_img$wt_type==wt_type_vec[k],"Y"] <- as.vector(t(Y_mat))
+  t2 <- Sys.time()
+  
+  gen_time[k] <- t2-t1
+  
+}
+```
+
+```{r class.source = 'fold-hide'}
+df_img %>% 
+  ggplot(aes(x=s1, y=s2, fill=Y))+
+  geom_tile()+
+  facet_wrap(~wt_type)+
+  labs(title = "generated data")
+
+df_img %>% 
+  group_by(wt_type) %>% 
+  group_modify(~{variogram(Y~1, location = ~s1+s2, data = .x)}) %>%
+  ggplot()+
+  geom_line(aes(x=dist, y=gamma))+
+  geom_point(aes(x=dist, y=gamma))+
+  facet_wrap(~wt_type)+
+  geom_hline(yintercept = 1, linetype = "dashed")+
+  labs(y="Sample variagram")
+
+# summary distribution
+df_img %>% 
+  ggplot(aes(x=wt_type, y=Y))+
+  geom_boxplot()+
+  geom_jitter(size=0.2)+
+  geom_hline(yintercept = 0, color="red")+
+  labs(title = "Distribution")
+  
+```
+
+

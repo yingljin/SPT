@@ -48,6 +48,11 @@ PS: how to simulate data that looks like lesion
 - Maybe two filters?
 3. Correction factor? 
 
+
+# 4/25
+1. Multiple features - sounds like nueral network
+2. Information loss from voxel-level summary to lesion-level summary
+
 # 24/4/9
 Some notes after talking with Antonio: 
 
