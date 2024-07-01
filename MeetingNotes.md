@@ -68,3 +68,7 @@ Meeting with Andrew:
 2. Generate correlated images (Generative adversarial network, diffusion model, etc). 
 3. The weird semivariogram may have to do with edge behaviors. Statistically, the edges pixels seem to be correlated with center pixels. 
 
+
+# 24/7/1
+1. Some scans are incomplete
+

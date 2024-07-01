@@ -1,0 +1,128 @@
+---
+title: "Investigating MS Lesion Scans"
+author: "Ying Jin"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    self_contained: true
+    number_sections: true
+    code_folding: show
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    font: 12pt
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(neurobase) # https://cran.r-project.org/web/packages/neurobase/index.html
+library(tidyverse)
+library(here)
+```
+
+
+```{r load_data}
+### File paths ####
+# list.files("DataRaw")
+paths <- read.csv(here("DataRaw/WM_lesion_QC_result.csv"))
+# 82 scans
+# 8 subjects
+# 4 sites
+# two scans each sites
+
+#### Read processed image and segmentation ####
+paths <- paths %>% 
+  separate(., col=flair_files, 
+           into = c(rep(NA, 8), "registration", "flair", "name1"),
+           sep = "/") %>% 
+  separate(., col=mimosa_files, 
+           into = c(rep(NA, 8), "mimosa", "name2"),
+           sep = "/") 
+
+paths <- paths %>%
+  mutate(subject = gsub("-", "", subject)) %>%
+  mutate(
+  file_path = paste0("DataRaw/processed/data/sub-", subject, "/ses-", session, 
+                     "/", registration, "/", flair, "/", name1),
+  seg_path =  paste0("DataRaw/processed/data/sub-", subject, "/ses-", session, 
+                     "/", mimosa, "/", name2)
+) 
+
+# let's use one subject as an example 
+paths_01001 <- paths %>% filter(subject=="01001") 
+
+# reading in and display
+list_mat <- list()
+list_img <- list()
+list_seg_img <- list()
+list_seg_mat <- list()
+for(p in seq_along(paths_01001$file_path)){
+  
+  # image
+  img_p <- readNIfTI(paths_01001$file_path[p], reorient = F)
+  list_img[[p]] <- img_p
+  list_mat[[p]] <- img_p@.Data
+  # segmentation
+  seg_p <- readNIfTI(paths_01001$seg_path[p], reorient = F)
+  list_seg_img[[p]] <- seg_p
+  list_seg_mat[[p]] <- seg_p@.Data
+}
+```
+
+
+# Example of subject 01-001
+
+## Whole images
+
+Let's start by looking at the entire images. The lesion is only a very small part of it.
+
+```{r BWH}
+ortho2(x=list_img[[1]], y=list_seg_img[[1]], crosshair=FALSE,  
+       text = paths_01001$session[1], 
+       text.x=40, text.y = 10, text.cex = 1)
+ortho2(x=list_img[[2]], y=list_seg_img[[2]], crosshair=FALSE,
+       text = paths_01001$session[2], 
+       text.x=40, text.y = 10, text.cex = 1)
+```
+
+
+```{r JHU}
+ortho2(x=list_img[[3]], y=list_seg_img[[3]], crosshair=FALSE,  
+       text = paths_01001$session[3], 
+       text.x=40, text.y = 10, text.cex = 1)
+ortho2(x=list_img[[4]], y=list_seg_img[[4]], crosshair=FALSE,
+       text = paths_01001$session[4], 
+       text.x=40, text.y = 10, text.cex = 1)
+```
+
+
+```{r NIH}
+ortho2(x=list_img[[5]], y=list_seg_img[[5]], crosshair=FALSE,  
+       text = paths_01001$session[5], 
+       text.x=40, text.y = 10, text.cex = 1)
+ortho2(x=list_img[[6]], y=list_seg_img[[6]], crosshair=FALSE,
+       text = paths_01001$session[6], 
+       text.x=40, text.y = 10, text.cex = 1)
+```
+
+
+```{r Penn}
+ortho2(x=list_img[[7]], y=list_seg_img[[7]], crosshair=FALSE,  
+       text = paths_01001$session[7], 
+       text.x=40, text.y = 10, text.cex = 1)
+ortho2(x=list_img[[8]], y=list_seg_img[[8]], crosshair=FALSE,
+       text = paths_01001$session[8], 
+       text.x=40, text.y = 10, text.cex = 1)
+```
+
+## Change between scan at the same loation
+
+Scatter plots with a fitted linear line? 
+
+```{r, eval=FALSE}
+plot(list_img[[1]]@.Data, list_img[[2]]@.Data, pch = 20)
+```
+
+
+

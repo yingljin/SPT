@@ -7,7 +7,7 @@
 
 # library(oro.nifti) # Whitcher2011
 library(neurobase) # https://cran.r-project.org/web/packages/neurobase/index.html
-#library(fslr)
+library(tidyverse)
 library(here)
 #library(keras)
 #library(abind)
@@ -15,19 +15,87 @@ library(RGAN)
 library(torch)
 
 #### File paths ####
-list.files("DataRaw")
+# list.files("DataRaw")
 paths <- read.csv(here("DataRaw/WM_lesion_QC_result.csv"))
 # 82 scans
 # 8 subjects
 # 4 sites
 # two scans each sites
 
-table(paths$subject)
+#### Read processed image and segmentation ####
+paths <- paths %>% 
+  separate(., col=flair_files, 
+           into = c(rep(NA, 8), "registration", "flair", "name1"),
+           sep = "/") %>% 
+  separate(., col=mimosa_files, 
+           into = c(rep(NA, 8), "mimosa", "name2"),
+           sep = "/") 
+
+paths <- paths %>%
+  mutate(subject = gsub("-", "", subject)) %>%
+  mutate(
+  file_path = paste0("DataRaw/processed/data/sub-", subject, "/ses-", session, 
+                     "/", registration, "/", flair, "/", name1),
+  seg_path =  paste0("DataRaw/processed/data/sub-", subject, "/ses-", session, 
+                     "/", mimosa, "/", name2)
+) 
+
+# let's use one subject as an example 
+paths_01001 <- paths %>% filter(subject=="01001") 
+
+# reading in and display
+list_mat <- list()
+list_img <- list()
+list_seg_img <- list()
+list_seg_mat <- list()
+for(p in seq_along(paths_01001$file_path)){
+  
+  # image
+  img_p <- readNIfTI(paths_01001$file_path[p], reorient = F)
+  list_img[[p]] <- img_p
+  list_mat[[p]] <- img_p@.Data
+  # segmentation
+  seg_p <- readNIfTI(paths_01001$seg_path[p], reorient = F)
+  list_seg_img[[p]] <- seg_p
+  list_seg_mat[[p]] <- seg_p@.Data
+}
+
+#### Plot ####
+# whole image
+par(mfrow = c(1, 2))
+ortho2(x=list_img[[1]], y=list_seg_img[[1]], crosshair=FALSE)
+ortho2(x=list_img[[2]], y=list_seg_img[[2]], crosshair=FALSE)
+hist(list_img[[1]])
+hist(list_img[[2]])
+
+# only lesion image
+l1 <- list_img[[1]][list_seg_img[[1]]==1]
+l2 <- list_img[[2]][list_seg_img[[2]]==1]
+dim(l1)
+
+image(list_seg_img[[1]], plot.type = "single", z=128)
+
+mask = ifelse(list_seg_img[[1]]==1, 1, NA)
+overlay(list_img[[1]], y = mask, plot.type="single", z=128)
 
 
-head(paths)
+
+
+summary(list_img[[1]]@.Data)
+
+lapply(list_01001, dim)
+
+img1 <- readNIfTI(paths_01001$file_path[1], reorient = F)
+img1
+aux_file(img1)
+descrip(img1)
+image(img1, plot.type="single", z=100) # plot a slice 
+orthographic(img1) 
+
 
 #### Exploratory ####
+
+
 
 # I think I know too little about image analysis
 # That I couldn't identify what to do just by looking at the images
@@ -64,7 +132,7 @@ for(i in seq_along(fileNames)){
   file_i <- paste0("Data/mscamras/", fileNames[i])
   img_i <- tryCatch(expr = {readNIfTI(fname = file_i, reorient = FALSE)},
     error = function(e){return(NA)})
-  img_01001[[i]] <- img_i
+  img_01001[[i]] <- img_i@.Data
 
 }
 
@@ -72,7 +140,7 @@ names(img_01001) <- fileNames
 img_01001 # only the hopkins scanes can be read in? 
 
 orthographic(img_01001[[2]]) 
-
+img1@.Data
 
 
 # looks like the subject had a lot of changes between the two scans? 
