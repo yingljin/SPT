@@ -116,12 +116,40 @@ ortho2(x=list_img[[8]], y=list_seg_img[[8]], crosshair=FALSE,
        text.x=40, text.y = 10, text.cex = 1)
 ```
 
-## Change between scan at the same loation
+## Preliminary analysis 
 
-Scatter plots with a fitted linear line? 
+I am not exactly sure what to do here, since we do not have two measures for each pixel. Also, the size/location of lesion would change across scans and site. There is no one-to-one relationship here. 
 
-```{r, eval=FALSE}
-plot(list_img[[1]]@.Data, list_img[[2]]@.Data, pch = 20)
+If the goal is to generate image, then it would not be a problem. But if the goal is to generate WMF and QSM, we would at least need to know how these values are calculated. 
+
+I think we would need to focust on the lesion part (is that correct?) and also that would reduce the data by quite a bit. So I hope to start there. 
+
+I think I can start by doing things with the whole image. At least there would be one-to-one relationship across the scans at the same site. 
+
+
+```{r Scatterplots}
+locs <- c("BWH", "Hopkins", "NIH", "Penn")
+
+for(i in 1:4){
+
+    pscan <- data.frame(
+        scan1 = as.vector(list_mat[[2*i-1]]),
+        scan2 = as.vector(list_mat[[2*i]]),
+        lesion1 = as.vector(list_seg_mat[[2*i-1]]),
+        lesion2 = as.vector(list_seg_mat[[2*i]])
+      ) %>%
+        mutate(lesion = paste0(lesion1, lesion2)) %>%
+        mutate(lesion = factor(lesion, levels = c("00", "10", "01", "11"),
+                               labels = c("", "Scan1", "Scan2", "Both"))) %>%
+        ggplot()+
+        geom_point(aes(x=scan1, y=scan2, col = lesion), alpha = 0.5, size = 0.2)+
+        geom_smooth(aes(x=scan1, y=scan2), method = "lm", formula = y~x)+
+        ggpubr::stat_cor(aes(x=scan1, y=scan2), method="spearman")+
+        scale_color_brewer(type = "div", palette = "BrBG", direction = -1)+
+        labs(title = locs[i], x = "Scan1", y="Scan2")
+    print(pscan)
+  
+}
 ```
 
 
