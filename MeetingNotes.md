@@ -72,3 +72,7 @@ Meeting with Andrew:
 # 24/7/1
 1. Some scans are incomplete
 
+# 24/7/9
+1. Figure out the incomplete scan and different dimension problems at Hopkins
+2. Use the lesion area in visit 1 as the "true" lesion, and only study the change across visits within this area
+
