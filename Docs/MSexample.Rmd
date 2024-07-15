@@ -19,6 +19,7 @@ knitr::opts_chunk$set(echo = FALSE)
 library(neurobase) # https://cran.r-project.org/web/packages/neurobase/index.html
 library(tidyverse)
 library(here)
+theme_set(theme_minimal())
 ```
 
 
@@ -49,6 +50,14 @@ paths <- paths %>%
                      "/", mimosa, "/", name2)
 ) 
 
+```
+
+
+
+```{r}
+
+subj_id <- unique(subj)
+
 # let's use one subject as an example 
 paths_01001 <- paths %>% filter(subject=="01001") 
 
@@ -60,11 +69,11 @@ list_seg_mat <- list()
 for(p in seq_along(paths_01001$file_path)){
   
   # image
-  img_p <- readNIfTI(paths_01001$file_path[p], reorient = F)
+  img_p <- readNIfTI(here(paths_01001$file_path[p]), reorient = F)
   list_img[[p]] <- img_p
   list_mat[[p]] <- img_p@.Data
   # segmentation
-  seg_p <- readNIfTI(paths_01001$seg_path[p], reorient = F)
+  seg_p <- readNIfTI(here(paths_01001$seg_path[p]), reorient = F)
   list_seg_img[[p]] <- seg_p
   list_seg_mat[[p]] <- seg_p@.Data
 }
@@ -116,41 +125,53 @@ ortho2(x=list_img[[8]], y=list_seg_img[[8]], crosshair=FALSE,
        text.x=40, text.y = 10, text.cex = 1)
 ```
 
-## Preliminary analysis 
+# Preliminary analysis 
 
-I am not exactly sure what to do here, since we do not have two measures for each pixel. Also, the size/location of lesion would change across scans and site. There is no one-to-one relationship here. 
+The current plan is to study the correlation between scans within a specific area. Right now, I will use the area that is labeled as positive in the first scan. 
 
-If the goal is to generate image, then it would not be a problem. But if the goal is to generate WMF and QSM, we would at least need to know how these values are calculated. 
+Taking one subject as an example. Let's first pick out pixels that is labeled positive in either scan.
 
-I think we would need to focust on the lesion part (is that correct?) and also that would reduce the data by quite a bit. So I hope to start there. 
+```{r}
+site <- c("BWH", "Hopkins", "NIH", "Penn")
+``` 
 
-I think I can start by doing things with the whole image. At least there would be one-to-one relationship across the scans at the same site. 
+
+```{r Scatter}
+table(df_scans$scan)
+df_scans <- df_scans %>% filter(seg==1)
+df_scans %>% pivot_wider(names_from = scan,
+                         values_from = pix)
+  
+  
+  
+  group_modify(~{
+    sc1 <- .x$pix[.x$scan=="01"]
+    sc2 <- .x$pix[.x$scan=="02"]
+    cor(sc1, sc2)
+  })
+
+dfi <- df_scans %>% filter(id == "01001")
+dfi$pix[dfi$scan == "01"]
+```
 
 
-```{r Scatterplots}
-locs <- c("BWH", "Hopkins", "NIH", "Penn")
+```{r Cor}
+# container
+df_cor <- data.frame(ID = NA, Site= NA, cor = NA, p=NA)
 
-for(i in 1:4){
-
-    pscan <- data.frame(
+for(i in seq_along(site)){
+  df_i <- data.frame(
         scan1 = as.vector(list_mat[[2*i-1]]),
         scan2 = as.vector(list_mat[[2*i]]),
         lesion1 = as.vector(list_seg_mat[[2*i-1]]),
         lesion2 = as.vector(list_seg_mat[[2*i]])
       ) %>%
-        mutate(lesion = paste0(lesion1, lesion2)) %>%
-        mutate(lesion = factor(lesion, levels = c("00", "10", "01", "11"),
-                               labels = c("", "Scan1", "Scan2", "Both"))) %>%
-        ggplot()+
-        geom_point(aes(x=scan1, y=scan2, col = lesion), alpha = 0.5, size = 0.2)+
-        geom_smooth(aes(x=scan1, y=scan2), method = "lm", formula = y~x)+
-        ggpubr::stat_cor(aes(x=scan1, y=scan2), method="spearman")+
-        scale_color_brewer(type = "div", palette = "BrBG", direction = -1)+
-        labs(title = locs[i], x = "Scan1", y="Scan2")
-    print(pscan)
+    filter(lesion1==1 | lesion2==1) 
+  
+  df_i
+  
+  print(pscan)
+  
   
 }
 ```
-
-
-
