@@ -24,6 +24,10 @@ theme_set(theme_minimal())
 
 
 ```{r load_data}
+# all
+load(here("DataOutput/df_scans.RData"))
+
+
 ### File paths ####
 # list.files("DataRaw")
 paths <- read.csv(here("DataRaw/WM_lesion_QC_result.csv"))
@@ -55,9 +59,6 @@ paths <- paths %>%
 
 
 ```{r}
-
-subj_id <- unique(subj)
-
 # let's use one subject as an example 
 paths_01001 <- paths %>% filter(subject=="01001") 
 
@@ -127,51 +128,40 @@ ortho2(x=list_img[[8]], y=list_seg_img[[8]], crosshair=FALSE,
 
 # Preliminary analysis 
 
-The current plan is to study the correlation between scans within a specific area. Right now, I will use the area that is labeled as positive in the first scan. 
+The current plan is to study the correlation between scans within a specific area. Right now, I will use the area that is labeled as positive in both scans. 
 
-Taking one subject as an example. Let's first pick out pixels that is labeled positive in either scan.
+Taking one subject as an example: 
 
-```{r}
-site <- c("BWH", "Hopkins", "NIH", "Penn")
-``` 
-
+1. first pick out pixels that is labeled positive in either scan.
+2. Because scan across sites are so different in scale, let's standardize them. 
+3. Calulate pearson correlation between scans from the same subject at the same site
 
 ```{r Scatter}
-table(df_scans$scan)
+# pick out the pixels that are labeled as positive in either scan
 df_scans <- df_scans %>% filter(seg==1)
-df_scans %>% pivot_wider(names_from = scan,
-                         values_from = pix)
-  
-  
-  
-  group_modify(~{
-    sc1 <- .x$pix[.x$scan=="01"]
-    sc2 <- .x$pix[.x$scan=="02"]
-    cor(sc1, sc2)
-  })
 
-dfi <- df_scans %>% filter(id == "01001")
-dfi$pix[dfi$scan == "01"]
+# add a location index
+df_scan_wide <- df_scans %>% group_by(id, site, scan) %>% 
+  group_modify(~{.x %>% mutate(pixid = 1:nrow(.x))}) %>% 
+  pivot_wider(names_from = scan,
+              values_from = c(pix, seg)) 
 ```
 
 
-```{r Cor}
-# container
-df_cor <- data.frame(ID = NA, Site= NA, cor = NA, p=NA)
 
-for(i in seq_along(site)){
-  df_i <- data.frame(
-        scan1 = as.vector(list_mat[[2*i-1]]),
-        scan2 = as.vector(list_mat[[2*i]]),
-        lesion1 = as.vector(list_seg_mat[[2*i-1]]),
-        lesion2 = as.vector(list_seg_mat[[2*i]])
-      ) %>%
-    filter(lesion1==1 | lesion2==1) 
-  
-  df_i
-  
-  print(pscan)
-  
-  
-}
+
+```{r fig.height=32, fig.width=12}
+df_scan_wide %>% 
+  group_by(id, site) %>%
+  mutate_at(c("pix_01", "pix_02"), scale) %>%
+  # mutate_at(c("seg_01", "seg_02"), function(x){ifelse(is.na(x), 0, 1)}) %>%
+  # mutate(colcode = as.factor(seg_01+seg_02)) %>% 
+  ggplot(aes(x=pix_01, y=pix_02))+
+  geom_point(size = 0.2, na.rm = T, alpha = 0.5)+
+  geom_smooth(formula = y~x, method = "lm", na.rm = T)+
+  ggpubr::stat_cor(cor.coef.name = "R", na.rm = T)+
+  facet_grid(rows = vars(id), cols = vars(site))
 ```
+
+The range of the Hopkins scans seem to be much larger than the other sites. 
+
