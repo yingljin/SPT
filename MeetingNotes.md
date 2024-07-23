@@ -76,3 +76,5 @@ Meeting with Andrew:
 1. Figure out the incomplete scan and different dimension problems at Hopkins
 2. Use the lesion area in visit 1 as the "true" lesion, and only study the change across visits within this area
 
+# 24/7/23
+1. Regression on the same visit across (pairwise) sites.
