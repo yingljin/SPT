@@ -148,6 +148,9 @@ df_scan_wide <- df_scans %>% group_by(id, site, scan) %>%
 ```
 
 
+## Cross-scan regression
+
+- Regress the second scan on the first scan at given site of the same subject
 
 
 ```{r fig.height=32, fig.width=12}
@@ -164,4 +167,50 @@ df_scan_wide %>%
 ```
 
 The range of the Hopkins scans seem to be much larger than the other sites. 
+
+# Cross-site regression
+
+Regress one site on another site (pairwise) at given scan of the same subject.
+
+But how can we do this? Scans at different sites does not have the same one-to-one relationship across voxels. Instead of the relationship between two matrices, this is more like testing the relationship between two distribution. 
+
+Below is the distribution of standardized scan: 
+
+```{r}
+df_scans %>% 
+  filter(id=="01001") %>%
+  group_by(scan, site) %>%
+  mutate(pix = scale(pix)) %>%
+  ggplot()+
+  geom_histogram(aes(x=pix), bins = 30)+
+  facet_grid(rows=vars(scan), cols = vars(site))+
+  labs(title="Subject 01001")
+```
+
+```{r fig.height=32, fig.width=12, eval=FALSE}
+# add a location index
+# create wide data 
+df_scan_wide2 <- df_scans %>% group_by(id, site, scan) %>% 
+  group_modify(~{.x %>% mutate(pixid = 1:nrow(.x))}) %>% 
+  pivot_wider(names_from = site,
+              values_from = c(pix, seg)) 
+
+```
+
+
+```{r, fig.height=8, fig.width=2, eval=FALSE}
+df_scan_wide2 %>% 
+  group_by(id, scan) %>%
+  mutate_at(vars(starts_with("pix_")), scale) %>%
+  # mutate_at(c("seg_01", "seg_02"), function(x){ifelse(is.na(x), 0, 1)}) %>%
+  # mutate(colcode = as.factor(seg_01+seg_02)) %>% 
+  ggplot(aes(x=pix_BWH, y=pix_Hopkins))+
+  geom_point(size = 0.2, na.rm = T, alpha = 0.5)+
+  geom_smooth(formula = y~x, method = "lm", na.rm = T)+
+  ggpubr::stat_cor(cor.coef.name = "R", na.rm = T)+
+  facet_grid(rows = vars(id), cols = vars(scan))+
+  labs("Hopkins ~ BWH")
+```
+
+
 
