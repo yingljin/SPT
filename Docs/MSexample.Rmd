@@ -83,9 +83,9 @@ for(p in seq_along(paths_01001$file_path)){
 
 # Data
 
-The image data was read in as two 3-D matrices. The first one if with intensity value, the second one a binary flag, with one indicating a lesion voxel and zero a normal voxel. Please not that the lesion flag was obtained through a automatic segmentation process. As a consequence, there could be false positive flags.
+The image data was read in as two 3-D matrices. The first one contains the intensity values, the second binary flags, with one indicating a lesion voxel and zero a normal voxel. Please note that the lesion flag was obtained through a automatic segmentation process. As a consequence, there could be false positive flags.
 
-Below is an example of one subject (01-001). The red part are voxels labeled as lesion.
+Below is an example of one subject (01-001). Voxels labeled as lesion are marked out by red. 
 
 ```{r BWH}
 ortho2(x=list_img[[1]], y=list_seg_img[[1]], crosshair=FALSE,  
@@ -144,7 +144,7 @@ df_scans <- df_scans %>% filter(seg==1)
 df_scan_wide <- df_scans %>% group_by(id, site, scan) %>% 
   group_modify(~{.x %>% mutate(pixid = 1:nrow(.x))}) %>% 
   pivot_wider(names_from = scan,
-              values_from = c(pix, seg)) 
+              values_from = c(pix, seg))
 ```
 
 
@@ -161,7 +161,8 @@ df_scan_wide %>%
   geom_point(size = 0.2, na.rm = T, alpha = 0.5)+
   geom_smooth(formula = y~x, method = "lm", na.rm = T)+
   ggpubr::stat_cor(cor.coef.name = "R", na.rm = T)+
-  facet_grid(rows = vars(id), cols = vars(site))
+  facet_grid(rows = vars(id), cols = vars(site))+
+  labs(y="Scan 2", x="Scan 1")
 ```
 
 The major concern with this output is the lack of correlation across scans from the same subject at the same site. As the figure shows, the correlation value is very close two zero for most of these figures. 
