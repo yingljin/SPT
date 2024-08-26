@@ -81,11 +81,11 @@ for(p in seq_along(paths_01001$file_path)){
 ```
 
 
-# Example of subject 01-001
+# Data
 
-## Whole images
+The image data was read in as two 3-D matrices. The first one if with intensity value, the second one a binary flag, with one indicating a lesion voxel and zero a normal voxel. Please not that the lesion flag was obtained through a automatic segmentation process. As a consequence, there could be false positive flags.
 
-Let's start by looking at the entire images. The lesion is only a very small part of it.
+Below is an example of one subject (01-001). The red part are voxels labeled as lesion.
 
 ```{r BWH}
 ortho2(x=list_img[[1]], y=list_seg_img[[1]], crosshair=FALSE,  
@@ -128,13 +128,13 @@ ortho2(x=list_img[[8]], y=list_seg_img[[8]], crosshair=FALSE,
 
 # Preliminary analysis 
 
-The current plan is to study the correlation between scans within a specific area. Right now, I will use the area that is labeled as positive in both scans. 
+The current plan is to study the correlation between scans done at each specific area. A separate linear regression model of scan 2 on scan 1 is fit on each subject at each site, and only voxels that are labeled as "positive" in both scans are used in the regression.   
 
-Taking one subject as an example: 
+Below is a detailed procedure for regression on each subject at each site:
 
-1. first pick out pixels that is labeled positive in either scan.
-2. Because scan across sites are so different in scale, let's standardize them. 
-3. Calulate pearson correlation between scans from the same subject at the same site
+1. pick out voxels that are labeled positive in both scan.
+2. standardize the intensity value 
+3. fit regression a model calculate pearson correlation between scans from the same subject at the same site
 
 ```{r Scatter}
 # pick out the pixels that are labeled as positive in either scan
@@ -148,9 +148,7 @@ df_scan_wide <- df_scans %>% group_by(id, site, scan) %>%
 ```
 
 
-## Cross-scan regression
-
-- Regress the second scan on the first scan at given site of the same subject
+Below is a display of the results. If any subject did not received a scan at any site, the corresponding figure is left empty. 
 
 
 ```{r fig.height=32, fig.width=12}
@@ -166,26 +164,27 @@ df_scan_wide %>%
   facet_grid(rows = vars(id), cols = vars(site))
 ```
 
-The range of the Hopkins scans seem to be much larger than the other sites. 
+The major concern with this output is the lack of correlation across scans from the same subject at the same site. As the figure shows, the correlation value is very close two zero for most of these figures. 
 
-# Cross-site regression
 
-Regress one site on another site (pairwise) at given scan of the same subject.
+<!-- # Cross-site regression -->
 
-But how can we do this? Scans at different sites does not have the same one-to-one relationship across voxels. Instead of the relationship between two matrices, this is more like testing the relationship between two distribution. 
+<!-- Regress one site on another site (pairwise) at given scan of the same subject. -->
 
-Below is the distribution of standardized scan: 
+<!-- But how can we do this? Scans at different sites does not have the same one-to-one relationship across voxels. Instead of the relationship between two matrices, this is more like testing the relationship between two distribution.  -->
 
-```{r}
-df_scans %>% 
-  filter(id=="01001") %>%
-  group_by(scan, site) %>%
-  mutate(pix = scale(pix)) %>%
-  ggplot()+
-  geom_histogram(aes(x=pix), bins = 30)+
-  facet_grid(rows=vars(scan), cols = vars(site))+
-  labs(title="Subject 01001")
-```
+<!-- Below is the distribution of standardized scan:  -->
+
+<!-- ```{r} -->
+<!-- df_scans %>%  -->
+<!--   filter(id=="01001") %>% -->
+<!--   group_by(scan, site) %>% -->
+<!--   mutate(pix = scale(pix)) %>% -->
+<!--   ggplot()+ -->
+<!--   geom_histogram(aes(x=pix), bins = 30)+ -->
+<!--   facet_grid(rows=vars(scan), cols = vars(site))+ -->
+<!--   labs(title="Subject 01001") -->
+<!-- ``` -->
 
 ```{r fig.height=32, fig.width=12, eval=FALSE}
 # add a location index
