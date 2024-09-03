@@ -26,7 +26,10 @@ theme_set(theme_minimal())
 ```{r load_data}
 # all
 load(here("DataOutput/df_scans.RData"))
+```
 
+
+```{r}
 
 ### File paths ####
 # list.files("DataRaw")
@@ -49,7 +52,7 @@ paths <- paths %>%
   mutate(subject = gsub("-", "", subject)) %>%
   mutate(
   file_path = paste0("DataRaw/processed/data/sub-", subject, "/ses-", session, 
-                     "/", registration, "/", flair, "/", name1),
+                     "/whitestripe/FLAIR_space/t1_n4_brain_reg_flair_ws.nii.gz"),
   seg_path =  paste0("DataRaw/processed/data/sub-", subject, "/ses-", session, 
                      "/", mimosa, "/", name2)
 ) 
@@ -78,6 +81,8 @@ for(p in seq_along(paths_01001$file_path)){
   list_seg_img[[p]] <- seg_p
   list_seg_mat[[p]] <- seg_p@.Data
 }
+
+# lapply(list_mat, dim)
 ```
 
 
@@ -135,6 +140,11 @@ Below is a detailed procedure for regression on each subject at each site:
 1. pick out voxels that are labeled positive in both scan.
 2. standardize the intensity value 
 3. fit regression a model calculate pearson correlation between scans from the same subject at the same site
+
+The major concern with this output is the lack of correlation across scans from the same subject at the same site. As the figure shows, the correlation value is very close two zero for most of these figures. 
+
+
+I used the whitestripe/FLAIR_space/ti_n4_brain_reg_flair_ws.nii.gz in this analysis, which seems to be the final destination of all preprocessing procedure. Compared to the images in "registration", the correlation increased, but not by a lot. We also see some outlyint voxels. 
 
 ```{r Scatter}
 # pick out the pixels that are labeled as positive in either scan
