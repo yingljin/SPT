@@ -43,37 +43,41 @@ paths <- paths %>%
 paths <- paths %>% filter(subject=="01001")
 
 img_list <- list()
+seg_list <- list()
 
 for(p in 1:nrow(paths)){
   
   img_p <- readNIfTI(here(paths$file_path[p]), reorient = F)
-  # seg_p <- readNIfTI(here(paths$seg_path[p]), reorient = F)
+  seg_p <- readNIfTI(here(paths$seg_path[p]), reorient = F)
   # don't need segmentation information for simulation?
   
   img_list[[p]] <- img_p
+  seg_list[[p]] <- seg_p
   
 }
 
 
+#### Segment lesion ####
+
+# Also for the sake of time, play with 2 images first
+
+# lesion?
+# img_mat1 <- img_list[[1]]@.Data[seg_list[[1]]@.Data==1 | seg_list[[2]]@.Data==1]
+# img_mat2 <- img_list[[2]]@.Data[seg_list[[1]]@.Data==1 | seg_list[[2]]@.Data==1]
+
+# one slice? 
+img_mat1 <- img_list[[1]]@.Data[88, ,]
+img_mat2 <- img_list[[2]]@.Data[88, ,]
+
+
+img_mat <- cbind(as.vector(img_mat1), as.vector(img_mat2))
+class(img_mat)
+
+plot(img_mat[, 1], img_mat[, 2])
   
 #### Generate Image ####
 
-
-# Also for the sake of time, play with 2 images first
-ortho2(x=img_list[[1]], crosshair=FALSE)
-ortho2(x=img_list[[2]], crosshair=FALSE)
-
-
-# First, standardize
-img_mat <- matrix(NA, nrow = 176*256*256, ncol = length(img_list[1:2]))
-
-for(c in 1:ncol(img_mat)){
-  img_mat[, c] <- as.vector(img_list[[p]]@.Data)
-}
-
-
-head(img_mat)
-
+# first, standardize
 ## Use a new data transformer.
 transformer <- data_transformer$new()
 ## Fit the transformer to your data.
@@ -81,6 +85,8 @@ transformer$fit(img_mat)
 ## Use the fitted transformer to transform your data.
 df_img_norm <- transformer$transform(img_mat)
 head(df_img_norm)
+
+plot(df_img_norm[, 1], df_img_norm[, 2], cex = 0.5, pch = 16)
 
 # Have a look at the transformed data.
 hist(df_img_norm[, 1], 30)
@@ -94,6 +100,7 @@ use_cuda <- torch::cuda_is_available()
 device <- ifelse(use_cuda, "cuda", "cpu")
 
 # Now train the GAN and observe some intermediate results.
+tic <- Sys.time()
 res <-
   gan_trainer(
     df_img_norm,
@@ -103,9 +110,9 @@ res <-
     device = device
   )
 
+toc <- Sys.time()
 
-
-
+toc-tic
 # After training you can work with the resulting GAN to sample synthetic data
 # or potentially keep training for further steps.
 
