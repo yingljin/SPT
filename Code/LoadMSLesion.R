@@ -1,11 +1,11 @@
 # Simulate lesion images
+# references: 
 # https://hopstat.wordpress.com/2014/06/17/fslr-an-r-package-interfacing-with-fsl-for-neuroimaging-analysis/
 # https://cran.r-project.org/web/packages/oro.nifti/oro.nifti.pdf
 # https://cran.r-project.org/web/packages/RGAN/RGAN.pdf
 
 #### Set up ####
 
-# library(oro.nifti) # Whitcher2011
 library(neurobase) # https://cran.r-project.org/web/packages/neurobase/index.html
 library(tidyverse)
 library(here)
@@ -15,7 +15,7 @@ library(RGAN)
 library(torch)
 
 #### File paths ####
-# list.files("DataRaw")
+# use the CSV file as a guide
 paths <- read.csv(here("DataRaw/WM_lesion_QC_result.csv"))
 # 82 scans
 # 8 subjects
@@ -23,6 +23,9 @@ paths <- read.csv(here("DataRaw/WM_lesion_QC_result.csv"))
 # two scans each sites
 
 #### Read processed image and segmentation ####
+# for intensity: use whitestripe/FLAIR_space/t1_n4_brain_reg_flair_ws.nii.gz
+# for segmentation: use minosa/mimosa_mask.nii.gz
+
 paths <- paths %>% 
   separate(., col=flair_files, 
            into = c(rep(NA, 8), "registration", "flair", "name1"),
@@ -35,20 +38,20 @@ paths <- paths %>%
   mutate(subject = gsub("-", "", subject)) %>%
   mutate(
   file_path = paste0("DataRaw/processed/data/sub-", subject, "/ses-", session, 
-                     "/", registration, "/", flair, "/", name1),
+                     "/whitestripe/FLAIR_space/t1_n4_brain_reg_flair_ws.nii.gz"),
   seg_path =  paste0("DataRaw/processed/data/sub-", subject, "/ses-", session, 
                      "/", mimosa, "/", name2)
 ) 
 
 
-# add a site variable
+# add index for site and scan
 paths <- paths %>% 
   select(subject, session, file_path, seg_path) %>%
   separate(col=session, sep = "_", into = c("site", "scan"), remove = F) %>%
   distinct(.) # duplicate scans
 
 #### Data Process ####
-# I am trying to put all the lesion data in to a data.frame
+# I am trying to put all the lesion data in to a long data.frame
 df_scans <- data.frame(id = NA, site = NA, scan = NA, pix = NA, seg = NA)
 
 for(p in 1:nrow(paths)){
@@ -66,7 +69,13 @@ for(p in 1:nrow(paths)){
     
 }
 
+##### Check #####
+table(df_scans$id)
+
+# remove the first empty row
 df_scans <- df_scans %>% filter(complete.cases(.))
 head(df_scans)  
 
 save(df_scans, file = here("DataOutput/df_scans.RData"))
+
+
