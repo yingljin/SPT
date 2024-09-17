@@ -25,7 +25,8 @@ theme_set(theme_minimal())
 
 ```{r load_data}
 # all
-load(here("DataOutput/df_scans.RData"))
+# load(here("DataOutput/df_scans.RData"))
+load(here("DataOutput/registered.RData"))
 ```
 
 
@@ -133,16 +134,7 @@ ortho2(x=list_img[[8]], y=list_seg_img[[8]], crosshair=FALSE,
 ```
 
 
-- How can I segment out the whole brain? 
 
-Use the mean of pixel value as threshold? 
-
-```{r}
-# use mean as threshold? 
-ortho2(x = list_img[[8]],
-        y = list_img[[8]] > mean(list_img[[8]]))
-
-```
 
 
 
@@ -167,43 +159,102 @@ I want to try to do the analysis on the brain instead of the lesion, and see if 
 
 If we could register scans from the same site, we may see higher correlation. I need to talk to Quy and Elizabeth to figure out how to do that. But the problem is, this data does not look like the data Amy's using. 
 
+<!-- After reviewing Elizabeth's code -->
+It looks like Elizabeth ignored the position correspondance, and sampled voxels from the large lesion to match the smaller lesion
 
-```{r Scatter}
-# pick out the pixels that are labeled as positive in either scan
-df_scans <- df_scans %>% filter(seg==1)
+```{r}
+# subject and site
+dataDir = '/Users/jinyin/Desktop/SPT/DataRaw/data'
+subs = list.dirs(dataDir, full.names = F, recursive = F)
+subs = subs[grepl("sub", subs)] # folder names of subjects
 
+# list the sites for each subject
+site = lapply(subs, function(sub) {
+  list.dirs(paste0(dataDir, '/', sub), full.names = F, recursive = F)
+})
 
-# or, segement out the whole brain region
-# df_scan_seg <- df_scans %>% group_by(id, site, scan) %>%
-#   mutate(brain = pix > mean(pix)) %>% 
-#   filter(brain)
+# subset session 1
+ses1 = lapply(site, function(s1) {
+  s1[grepl("_01$", s1)]
+})
 
-# add a location index
-df_scan_wide <- df_scans %>% group_by(id, site, scan) %>% 
-  group_modify(~{.x %>% mutate(pixid = 1:nrow(.x))}) %>% 
-  pivot_wider(names_from = scan,
-              values_from = c(pix, seg))
+# subset session 2
+ses2 = lapply(site, function(s2) {
+  s2[grepl("_02$", s2)]
+})
 ```
+
+```{r}
+# combine the two data sets from visit 1 and 2
+combined_results = lapply(seq_along(results_ses1), function(sub) {
+  lapply(seq_along(results_ses1[[sub]]), function(ses) {
+    
+    # combine session 1 and session 2 data with an inner join  
+    combined_data = results_ses1[[sub]][[ses]] %>% 
+      inner_join(results_ses2[[sub]][[ses]], by = c("voxel", "x", "y", "z"), suffix = c("_1", "_2")) %>% 
+    
+      # standardize the flair and t1 intensities
+      mutate(
+        flair_intensity1_std = (flair_intensity1 - mean(flair_intensity1, na.rm = TRUE)) / sd(flair_intensity1, na.rm = TRUE),
+        flair_intensity2_std = (flair_intensity2 - mean(flair_intensity2, na.rm = TRUE)) / sd(flair_intensity2, na.rm = TRUE),
+        
+        t1_intensity1_std = (t1_intensity1 - mean(t1_intensity1, na.rm = TRUE)) / sd(t1_intensity1, na.rm = TRUE),
+        t1_intensity2_std = (t1_intensity2 - mean(t1_intensity2, na.rm = TRUE)) / sd(t1_intensity2, na.rm = TRUE)
+      )
+    
+    return(combined_data)
+  })
+})
+```
+
+```{r}
+# name the combined data
+names(combined_results) <- subs
+site_name <- lapply(ses1, function(ses){
+  ses = gsub("ses-", "", ses)
+  ses = gsub("_01", "", ses)
+  return(ses)
+})
+
+for(site in seq_along(combined_results)){
+  names(combined_results[[site]]) <- site_name[[site]]
+  
+}
+
+# put into one big data frame
+df_scan <- lapply(combined_results, bind_rows, .id = "site")
+df_scan <- bind_rows(df_scan, .id = "sub")
+```
+
 
 
 Below is a display of the results. If any subject did not received a scan at any site, the corresponding figure is left empty. 
 
 
 ```{r fig.height=32, fig.width=12}
-df_scan_wide %>% 
-  group_by(id, site) %>%
-  mutate_at(c("pix_01", "pix_02"), scale) %>% # normalize the intensity value
-  # mutate_at(c("seg_01", "seg_02"), function(x){ifelse(is.na(x), 0, 1)}) %>%
-  # mutate(colcode = as.factor(seg_01+seg_02)) %>% 
-  ggplot(aes(x=pix_01, y=pix_02))+
+df_scan %>% 
+  group_by(sub, site) %>%
+  ggplot(aes(x=t1_intensity1, y=t1_intensity2))+
   geom_point(size = 0.2, na.rm = T, alpha = 0.5)+
   geom_smooth(formula = y~x, method = "lm", na.rm = T)+
   ggpubr::stat_cor(cor.coef.name = "R", na.rm = T)+
-  facet_grid(rows = vars(id), cols = vars(site))+
-  labs(y="Scan 2", x="Scan 1")
+  facet_grid(rows = vars(sub), cols = vars(site))+
+  labs(y="Scan 2", x="Scan 1", title = "T1")
 ```
 
-The major concern with this output is the lack of correlation across scans from the same subject at the same site. As the figure shows, the correlation value is very close two zero for most of these figures. 
+
+```{r fig.height=32, fig.width=12}
+df_scan %>% 
+  group_by(sub, site) %>%
+  ggplot(aes(x=flair_intensity1, y=flair_intensity2))+
+  geom_point(size = 0.2, na.rm = T, alpha = 0.5)+
+  geom_smooth(formula = y~x, method = "lm", na.rm = T)+
+  ggpubr::stat_cor(cor.coef.name = "R", na.rm = T)+
+  facet_grid(rows = vars(sub), cols = vars(site))+
+  labs(y="Scan 2", x="Scan 1", title = "flair")
+```
+
+
 
 
 
@@ -211,5 +262,32 @@ The major concern with this output is the lack of correlation across scans from 
 
 ```{r}
 library(RGAN)
-library(torch)
+
+# let's start with just on subject
+df_01001 <- df_scan %>% filter(sub == "sub-01001"& site == "NIH")
+
+plot(df_01001$t1_intensity1_std, df_01001$t1_intensity2_std, 
+     cex = 0.5, pch = 16)
+
+# Set the device you want to train on.
+# First, we check whether a compatible GPU is available for computation.
+use_cuda <- torch::cuda_is_available()
+
+# If so we would use it to speed up training (especially for models with image data).
+device <- ifelse(use_cuda, "cuda", "cpu")
+
+# Now train the GAN and observe some intermediate results.
+tic <- Sys.time()
+res <-
+  gan_trainer(
+    df_01001 %>% select(t1_intensity1_std, t1_intensity2_std) %>% as.matrix(), 
+    eval_dropout = TRUE,
+    plot_progress = TRUE,
+    plot_interval = 600,
+    device = device
+  )
+
+toc <- Sys.time()
+
+toc-tic
 ```
