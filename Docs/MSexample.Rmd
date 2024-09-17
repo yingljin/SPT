@@ -258,16 +258,19 @@ df_scan %>%
 
 
 
-# Try GAN 
+# GAN 
 
-```{r}
+For the sake of time, I started with just subject 01001 at site NIH, also only the overlapping lesion voxels. 
+
+```{r, results='hide'}
 library(RGAN)
+library(plotly)
 
 # let's start with just on subject
 df_01001 <- df_scan %>% filter(sub == "sub-01001"& site == "NIH")
 
-plot(df_01001$t1_intensity1_std, df_01001$t1_intensity2_std, 
-     cex = 0.5, pch = 16)
+# plot(df_01001$t1_intensity1_std, df_01001$t1_intensity2_std, 
+    # cex = 0.5, pch = 16)
 
 # Set the device you want to train on.
 # First, we check whether a compatible GPU is available for computation.
@@ -282,12 +285,75 @@ res <-
   gan_trainer(
     df_01001 %>% select(t1_intensity1_std, t1_intensity2_std) %>% as.matrix(), 
     eval_dropout = TRUE,
-    plot_progress = TRUE,
+    plot_progress = FALSE,
     plot_interval = 600,
     device = device
   )
 
 toc <- Sys.time()
 
-toc-tic
+print(paste0("Time spent training: ", round(toc-tic, 2), " secs"))
+
+```
+
+```{r}
+# sample synthetic data from GAN 
+
+## Set the noise vector.
+noise_vector <- torch::torch_randn(c(nrow(df_01001), 2))$to(device = device)
+
+## Generate synthetic data with dropout during generation.
+synth_data <- expert_sample_synthetic_data(res$generator, noise_vector,eval_dropout = TRUE)
+
+# Plot data and synthetic data
+GAN_update_plot(data = df_01001 %>% 
+                  select(t1_intensity1_std, t1_intensity2_std) %>% 
+                  as.matrix(), 
+                synth_data = synth_data, main = "With dropout")
+
+# head(synth_data_dropout, 15)
+```
+
+
+```{r}
+df_01001 <- df_01001 %>% 
+  mutate(synth_t1_int1 = synth_data[,1],
+         synth_t1_int2 = synth_data[,2])
+```
+
+The first scan: 
+
+```{r}
+# 3D plots
+df_01001 %>% 
+  plot_ly(., type = "scatter3d", mode="markers",
+          x=~x, y=~y, z=~z, color = ~t1_intensity1_std, 
+          size = 0.1,
+          symbols = c('circle')) %>% layout(title = "True")
+
+df_01001 %>% 
+  plot_ly(., type = "scatter3d", mode="markers",
+          x=~x, y=~y, z=~z, color = ~synth_t1_int1, 
+          size = 0.1,
+          symbols = c('circle')) %>% layout(title = "Synthetic")
+
+```
+
+
+The second scan:
+
+```{r}
+# 3D plots
+df_01001 %>% 
+  plot_ly(., type = "scatter3d", mode="markers",
+          x=~x, y=~y, z=~z, color = ~t1_intensity2_std, 
+          size = 0.1,
+          symbols = c('circle')) %>% layout(title = "True")
+
+df_01001 %>% 
+  plot_ly(., type = "scatter3d", mode="markers",
+          x=~x, y=~y, z=~z, color = ~synth_t1_int2, 
+          size = 0.1,
+          symbols = c('circle')) %>% layout(title = "Synthetic")
+
 ```
