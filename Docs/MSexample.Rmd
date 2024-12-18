@@ -1,5 +1,5 @@
 ---
-title: "Investigating MS Lesion Scans"
+title: "Investigating MS Lesion Scans and experienment with nerobase"
 author: "Ying Jin"
 date: "`r Sys.Date()`"
 output: 
@@ -89,7 +89,7 @@ for(p in seq_along(paths_01001$file_path)){
 
 # Data
 
-The image data was read in as two 3-D matrices. The first one contains the intensity values, the second binary flags, with one indicating a lesion voxel and zero a normal voxel. Please note that the lesion flag was obtained through a automatic segmentation process. As a consequence, there could be false positive flags.
+The image data was read in as 3D matrices. The first one contains the intensity values, the second binary flags, with one indicating a lesion voxel and zero a normal voxel. Please note that the lesion flag was obtained through a automatic segmentation process. As a consequence, there could be false positive flags.
 
 Below is an example of one subject (01-001). Voxels labeled as lesion are marked out by red. 
 
@@ -224,6 +224,7 @@ for(site in seq_along(combined_results)){
 # put into one big data frame
 df_scan <- lapply(combined_results, bind_rows, .id = "site")
 df_scan <- bind_rows(df_scan, .id = "sub")
+# save(df_scan, file = here("DataOutput/df_comb.RData"))
 ```
 
 
